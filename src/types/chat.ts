@@ -13,6 +13,7 @@ export interface ChatMessage {
   sender: ChatUser;
   roomId: string;
   attachments?: { id: string; originalName: string; mimeType: string; objectKey?: string; size?: number }[];
+  isSystem?: boolean;
 }
 
 export interface ChatRoom {
@@ -21,4 +22,5 @@ export interface ChatRoom {
   isGroup: boolean;
   members: ChatUser[];
   lastMessage: ChatMessage;
+  unread?: number;
 }

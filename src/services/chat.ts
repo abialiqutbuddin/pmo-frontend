@@ -7,6 +7,10 @@ export type Conversation = {
   departmentId?: string | null;
   issueId?: string | null;
   updatedAt: string;
+  lastMessage?: { id: string; authorId: string; body?: string | null; createdAt: string; author?: { id: string; fullName?: string; email?: string } } | null;
+  participants?: { userId: string; lastReadAt?: string | null; user?: { id: string; fullName?: string; email?: string } }[];
+  unreadCount?: number;
+  lastMessageAllRead?: boolean;
 };
 
 export type SendMessagePayload = { conversationId: string; body?: string; parentId?: string };
@@ -46,4 +50,7 @@ export const chatService = {
   startDirect: (eventId: string, userId: string) => api.post(`/chat/direct`, { eventId, userId }),
   addParticipants: (conversationId: string, userIds: string[]) => api.post(`/chat/conversations/${conversationId}/participants`, { conversationId, userIds }),
   listParticipants: (conversationId: string) => api.get(`/chat/conversations/${conversationId}/participants`),
+  removeParticipant: (conversationId: string, userId: string) => api.delete(`/chat/conversations/${conversationId}/participants/${userId}`),
+  updateParticipant: (conversationId: string, userId: string, body: { role?: 'MEMBER' | 'OWNER' }) => api.patch(`/chat/conversations/${conversationId}/participants/${userId}`, body),
+  readers: (messageId: string) => api.get<{ userId: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; readAt: string }[]>(`/chat/messages/${messageId}/readers`),
 };

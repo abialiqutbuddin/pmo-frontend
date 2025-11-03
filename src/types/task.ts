@@ -1,5 +1,6 @@
 // frontend/src/types/task.ts
 export type TaskStatus = 'todo' | 'in_progress' | 'blocked' | 'done' | 'canceled';
+export type TaskType = 'issue' | 'new_task' | 'taujeeh' | 'improvement';
 
 export interface TaskItem {
   id: string;
@@ -7,6 +8,8 @@ export interface TaskItem {
   departmentId?: string;
   creatorId: string;
   assigneeId?: string | null;
+  venueId?: string | null;
+  type?: TaskType | null;
   title: string;
   description?: string | null;
   priority: number; // 1..5
@@ -18,4 +21,3 @@ export interface TaskItem {
   updatedAt?: string;
   completedAt?: string | null;
 }
-

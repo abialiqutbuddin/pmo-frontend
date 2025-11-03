@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ChatMessage } from '../../types/chat';
 import { useAuthStore } from '../../store/authStore';
 import { CheckCheck, Paperclip, X } from 'lucide-react';
@@ -7,6 +7,10 @@ import { useContextStore } from '../../store/contextStore';
 import { BASE_URL } from '../../api';
 import { useState } from 'react';
 import { UserAvatar } from '../ui/UserAvatar';
+import { useChatStore } from '../../store/chatStore';
+import { chatService } from '../../services/chat';
+import { isDmRead, isGroupAllRead } from '../../lib/chatRead';
+import { ReadReceiptsPopover } from './ReadReceiptsPopover';
 
 interface MessageProps {
   message: ChatMessage;
@@ -18,6 +22,77 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
   const isOwnMessage = message.sender.id === currentUser?.id;
   const { currentEventId } = useContextStore();
   const [lightbox, setLightbox] = useState<{ src: string; name: string } | null>(null);
+  const conversations = useChatStore((s) => s.conversations);
+  const participants = useChatStore((s) => s.participants);
+
+  const isDirect = useMemo(() => {
+    const c = conversations.find((x) => x.id === message.roomId);
+    return c ? c.kind === 'DIRECT' : false;
+  }, [conversations, message.roomId]);
+
+  const dmRead = useMemo(() => (
+    !isOwnMessage || !isDirect ? false : isDmRead(participants[message.roomId], currentUser?.id, (message as any).createdAtISO || message.createdAt)
+  ), [isOwnMessage, isDirect, participants, message.roomId, (message as any).createdAtISO, message.createdAt, currentUser?.id]);
+
+  const groupAllRead = useMemo(() => (
+    !isOwnMessage || isDirect ? false : isGroupAllRead(participants[message.roomId], currentUser?.id, (message as any).createdAtISO || message.createdAt)
+  ), [isOwnMessage, isDirect, participants, message.roomId, (message as any).createdAtISO, message.createdAt, currentUser?.id]);
+
+  // Readers hover (group): cache per messageId with TTL
+  const [showReaders, setShowReaders] = useState(false);
+  const [readersLoading, setReadersLoading] = useState(false);
+  const [readers, setReaders] = useState<{ userId: string; fullName?: string; profileImage?: string; itsId?: string | null }[] | null>(null);
+  const [unreaders, setUnreaders] = useState<{ userId: string; fullName?: string; profileImage?: string; itsId?: string | null }[] | null>(null);
+  const cacheRef = useRef<{ ts: number; data: { readers: any[]; unreaders: any[] } } | null>(null);
+  const hoverTimer = useRef<number | null>(null);
+  const onHover = () => {
+    if (!isOwnMessage) return;
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(async () => {
+      setShowReaders(true);
+      // Use cached within 60s
+      const now = Date.now();
+      if (cacheRef.current && now - cacheRef.current.ts < 60000) {
+        setReaders(cacheRef.current.data.readers);
+        setUnreaders(cacheRef.current.data.unreaders);
+        return;
+      }
+      try {
+        setReadersLoading(true);
+        const rs = await chatService.readers(message.id);
+        // build participants info map for avatars/names
+        let map = participants[message.roomId] || {} as any;
+        if (!Object.keys(map).length) {
+          try {
+            const rows2: any[] = await chatService.listParticipants(message.roomId);
+            const m2: any = {};
+            rows2.forEach((r: any) => {
+              m2[r.userId] = { id: r.user?.id || r.userId, fullName: r.user?.fullName, email: r.user?.email, profileImage: r.user?.profileImage, itsId: r.user?.itsId };
+            });
+            map = m2;
+          } catch {}
+        }
+        const infoMap: Record<string, { name: string; profileImage?: string; itsId?: string | null }> = {};
+        Object.values(map).forEach((u: any) => { infoMap[u.id] = { name: (u.fullName || u.email || u.id) as string, profileImage: u.profileImage, itsId: u.itsId }; });
+        const meId = currentUser?.id;
+        const readerIds = new Set((rs || []).map((r: any) => r.userId));
+        const readersFmt = (rs || []).filter((r: any) => r.userId !== meId).map((r: any) => ({ userId: r.userId, fullName: r.fullName || infoMap[r.userId]?.name || r.userId, profileImage: infoMap[r.userId]?.profileImage, itsId: infoMap[r.userId]?.itsId }));
+        const unreadFmt: any[] = [];
+        Object.values(map).forEach((u: any) => { if (u.id !== meId && !readerIds.has(u.id)) unreadFmt.push({ userId: u.id, fullName: infoMap[u.id]?.name, profileImage: infoMap[u.id]?.profileImage, itsId: infoMap[u.id]?.itsId }); });
+        cacheRef.current = { ts: now, data: { readers: readersFmt, unreaders: unreadFmt } };
+        setReaders(readersFmt);
+        setUnreaders(unreadFmt);
+      } finally {
+        setReadersLoading(false);
+      }
+    }, 200); // debounce hover
+  };
+  const onLeave = () => {
+    if (hoverTimer.current) window.clearTimeout(hoverTimer.current);
+    setShowReaders(false);
+  };
+
+  const isSystemEvent = useMemo(() => !!(message as any).isSystem, [message]);
 
   const attachmentUrl = (att: any) => {
     if (att?.objectKey) {
@@ -31,6 +106,16 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
 
   const isImage = (m?: string) => !!m && m.startsWith('image/');
 
+  if (isSystemEvent) {
+    return (
+      <div className="flex justify-center my-1">
+        <div className="px-3 py-1 rounded bg-gray-200 text-gray-700 text-xs text-center">
+          <span className="font-medium">{message.sender.name}</span> {message.content}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
     <div className={clsx('flex items-end', isOwnMessage ? 'justify-end' : 'justify-start')}>
@@ -42,10 +127,11 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
       )}
       <div
         className={clsx(
-          'rounded-lg p-3 shadow-sm max-w-xs lg:max-w-md',
+          'relative rounded-lg p-3 shadow-sm max-w-xs lg:max-w-md',
           isOwnMessage ? 'bg-emerald-100' : 'bg-white',
         )}
       >
+          <>
         {/* Sender name (only when explicitly enabled, e.g., groups) */}
         {showSender && !isOwnMessage && (
           <div className="text-xs font-bold text-blue-600 mb-1">
@@ -89,7 +175,7 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
         )}
 
         {/* Timestamp and Read Receipt */}
-        <div className="flex justify-end items-center mt-1">
+        <div className="relative flex justify-end items-center mt-1" onMouseEnter={onHover} onMouseLeave={onLeave}>
           <span className="text-xs text-gray-500 mr-1">
             {message.createdAt}
           </span>
@@ -103,12 +189,24 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
               return (
                 <CheckCheck
                   size={16}
-                  className="text-blue-500"
+                  className={clsx(isDirect ? (dmRead ? 'text-blue-500' : 'text-gray-400') : (groupAllRead ? 'text-blue-500' : 'text-gray-400'))}
+                  title={isDirect ? (dmRead ? 'Read' : 'Sent') : (groupAllRead ? 'All read' : 'Not all read')}
                 />
               );
             })()
           )}
+          {/* Readers tooltip (group or any) */}
+          <ReadReceiptsPopover
+            open={isOwnMessage && showReaders && !isDirect}
+            loading={readersLoading}
+            readers={readers}
+            unreaders={unreaders}
+            meId={currentUser?.id}
+            containerClassName="absolute bottom-full right-0 mb-2"
+            arrow="bottom-right"
+          />
         </div>
+          </>
       </div>
     </div>
     {lightbox && (

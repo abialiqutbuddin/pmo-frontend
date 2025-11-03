@@ -83,7 +83,7 @@ export const AdminUsersPage: React.FC = () => {
         isDisabled: !!isDisabled,
       });
       setRows((prev) => [u, ...prev]);
-      setShowCreate(false);
+      setAdminUsers({ showCreate: false });
       setItsId('');
       setFullName('');
       setEmail('');
@@ -244,16 +244,17 @@ export const AdminUsersPage: React.FC = () => {
         <div className="p-5 space-y-3">
           <div className="grid md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm mb-1">ITS ID</label>
+              <label className="block text-sm mb-1">ITS ID<span className="text-rose-600"> *</span></label>
               <input
                 className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 placeholder="e.g., 12345678"
                 value={itsId}
+                maxLength={8}
                 onChange={(e) => setItsId(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-sm mb-1">Full name</label>
+              <label className="block text-sm mb-1">Full name<span className="text-rose-600"> *</span></label>
               <input
                 className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 value={fullName}
@@ -261,8 +262,9 @@ export const AdminUsersPage: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-sm mb-1">Email</label>
+              <label className="block text-sm mb-1">Email<span className="text-rose-600"> *</span></label>
               <input
+                type="email"
                 className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -326,15 +328,19 @@ export const AdminUsersPage: React.FC = () => {
               Create
             </button>
           </div>
-          <div className="text-xs text-gray-500">Initial password will be set to the ITS ID.</div>
+          <div className="text-xs text-gray-500">Fields marked * are required. Initial password is the ITS ID.</div>
         </div>
       </SideDrawer>
 
-      {/* Edit modal */}
-      {editing && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white w-full max-w-md rounded-lg shadow-lg border border-gray-200 p-6">
-            <div className="text-lg font-semibold mb-4">Edit User</div>
+      {/* Edit Drawer */}
+      <SideDrawer
+        open={!!editing}
+        onClose={() => setEditing(null)}
+        maxWidthClass="max-w-md"
+        header={<div className="text-xl font-semibold">Edit User</div>}
+      >
+        {editing && (
+          <div className="p-5 space-y-3">
             <div className="space-y-3">
               <div>
                 <label className="block text-sm mb-1">ITS ID</label>
@@ -458,8 +464,8 @@ export const AdminUsersPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </SideDrawer>
     </div>
   );
 };

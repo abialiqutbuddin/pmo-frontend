@@ -188,23 +188,18 @@ export const AdminPanelPage: React.FC = () => {
         <span className="ml-3 text-sm text-gray-500">{currentEventName}</span>
       </div>
 
-      {/* Department selector + create */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Building2 size={18} className="text-emerald-600" />
-            <span className="text-sm font-medium">Department</span>
-            <Dropdown
-              value={activeDeptId}
-              onChange={(v) => setActiveDeptId(v)}
-              options={depts.map((d) => ({ value: d.id, label: d.name }))}
-              title="Choose department"
-            />
+      {/* Departments + Members (simplified layout) */}
+      <div className="grid md:grid-cols-3 gap-4">
+        {/* Left: Departments list and creation */}
+        <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3 md:col-span-1">
+          <div className="flex items-center mb-1">
+            <Building2 size={18} className="text-emerald-600 mr-2" />
+            <div className="font-medium">Departments</div>
           </div>
 
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2">
             <input
-              className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+              className="flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               placeholder="New department name"
               value={newDeptName}
               onChange={(e) => setNewDeptName(e.target.value)}
@@ -217,92 +212,77 @@ export const AdminPanelPage: React.FC = () => {
             >
               <Plus size={16} className="mr-1" /> Create
             </button>
-            {activeDept && (
-              <>
-                <button
-                  className="text-gray-700 hover:text-black text-sm"
-                  title="Rename department"
-                  onClick={async () => {
-                    const name = prompt('Rename department', activeDept.name) || '';
-                    if (name && name !== activeDept.name) await renameDept(activeDept.id, name);
-                  }}
-                >
-                  <Pencil size={16} className="inline mr-1" /> Rename
-                </button>
-                <button
-                  className="text-rose-600 hover:text-rose-700 text-sm"
-                  title="Delete department"
-                  onClick={() => deleteDept(activeDept.id)}
-                >
-                  <Trash2 size={16} className="inline mr-1" /> Delete
-                </button>
-              </>
+          </div>
+          {deptsLoading && <div className="mt-2"><Spinner size="sm" label="Loading departments" /></div>}
+          {deptErr && <div className="text-xs text-rose-600">{deptErr}</div>}
+
+          <div className="border border-gray-100 rounded divide-y mt-2">
+            {(overview.length ? overview : depts.map((d) => ({ id: d.id, name: d.name, heads: [] as string[], memberCount: 0 } as any))).map((o: any) => (
+              <button
+                key={o.id}
+                className={`w-full text-left px-3 py-2 flex items-center justify-between hover:bg-gray-50 ${activeDeptId === o.id ? 'bg-blue-50' : ''}`}
+                onClick={() => setActiveDeptId(o.id)}
+              >
+                <div>
+                  <div className="font-medium text-gray-900">{o.name}</div>
+                  <div className="text-xs text-gray-500">{(o.heads && o.heads.length) ? o.heads.join(', ') : 'No heads'}</div>
+                </div>
+                <span className="text-xs text-gray-600">{o.memberCount ?? 0} members</span>
+              </button>
+            ))}
+            {(!overview.length && !depts.length) && (
+              <div className="px-3 py-4 text-sm text-gray-500">No departments yet. Create one above.</div>
             )}
           </div>
         </div>
-        {deptsLoading && <div className="mt-3"><Spinner size="sm" label="Loading departments" /></div>}
-        {deptErr && <div className="text-sm text-red-600 mt-3">{deptErr}</div>}
-      </div>
 
-      {/* Departments overview */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <div className="flex items-center mb-3">
-          <Building2 size={18} className="text-emerald-600 mr-2" />
-          <div className="font-medium">Departments Overview</div>
-        </div>
-        {overviewLoading && <Spinner size="sm" label="Loading overview" />}
-        {!overviewLoading && (
-          <div className="border border-gray-100 rounded overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-3 py-2 text-gray-600">Department</th>
-                  <th className="text-left px-3 py-2 text-gray-600">Head(s)</th>
-                  <th className="text-left px-3 py-2 text-gray-600">Members</th>
-                </tr>
-              </thead>
-              <tbody>
-                {overview.map((o) => (
-                  <tr key={o.id} className="border-b last:border-0">
-                    <td className="px-3 py-2">{o.name}</td>
-                    <td className="px-3 py-2">{o.heads.length ? o.heads.join(', ') : '—'}</td>
-                    <td className="px-3 py-2">{o.memberCount}</td>
-                  </tr>
-                ))}
-                {overview.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="px-3 py-4 text-center text-gray-500">No departments yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Members of selected department */}
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <div className="flex items-center mb-3">
-          <Users size={18} className="text-sky-600 mr-2" />
-          <div className="font-medium">Department Members</div>
-          <span className="ml-2 text-xs text-gray-500">{activeDept ? activeDept.name : 'Select a department'}</span>
-        </div>
-
-        {!activeDeptId && <div className="text-sm text-gray-500">Select a department to manage members.</div>}
-
-        {activeDeptId && (
-          <>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="relative flex-1">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  className="w-full pl-9 pr-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  placeholder="Search people to add"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  title="Search candidates"
-                />
+        {/* Right: Selected department details and members */}
+        <div className="bg-white border border-gray-200 rounded-lg p-4 md:col-span-2">
+          {!activeDept ? (
+            <div className="text-sm text-gray-500">Select a department from the left to view and manage its members.</div>
+          ) : (
+            <>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <div className="text-lg font-semibold">{activeDept.name}</div>
+                  <div className="text-xs text-gray-500">Manage memberships and roles</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    className="text-gray-700 hover:text-black text-sm"
+                    title="Rename department"
+                    onClick={async () => {
+                      const name = prompt('Rename department', activeDept.name) || '';
+                      if (name && name !== activeDept.name) await renameDept(activeDept.id, name);
+                    }}
+                  >
+                    <Pencil size={16} className="inline mr-1" /> Rename
+                  </button>
+                  <button
+                    className="text-rose-600 hover:text-rose-700 text-sm"
+                    title="Delete department"
+                    onClick={() => deleteDept(activeDept.id)}
+                  >
+                    <Trash2 size={16} className="inline mr-1" /> Delete
+                  </button>
+                </div>
               </div>
+
+              <div className="flex items-center mb-2">
+                <Users size={18} className="text-sky-600 mr-2" />
+                <div className="font-medium">Members</div>
+              </div>
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    className="w-full pl-9 pr-3 py-2 rounded-md border border-gray-200 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    placeholder="Search people to add"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    title="Search candidates"
+                  />
+                </div>
                 <Dropdown
                   value={assignRole}
                   onChange={(v) => setAssignRole(v as any)}
@@ -313,51 +293,51 @@ export const AdminPanelPage: React.FC = () => {
                   ]}
                   title="Role to assign"
                 />
-            </div>
-
-            {query && assignable.length > 0 && (
-              <div className="mb-3 max-h-40 overflow-y-auto border border-gray-100 rounded">
-                {assignable.map((a) => (
-                  <div key={a.userId} className="flex items-center justify-between px-3 py-2 border-b last:border-0">
-                    <div className="text-sm">
-                      <div className="font-medium">{a.fullName}</div>
-                      <div className="text-gray-500 text-xs">{a.email}</div>
-                    </div>
-                    <button
-                      className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-1.5 text-xs"
-                      onClick={() => addMember(a.userId)}
-                      disabled={assignLoading}
-                      title="Add to department"
-                    >
-                      <UserPlus size={14} className="mr-1" /> Add
-                    </button>
-                  </div>
-                ))}
               </div>
-            )}
 
-            {membersLoading && <Spinner size="sm" label="Loading members" />}
-            {membersErr && <div className="text-sm text-red-600">{membersErr}</div>}
-            {!membersLoading && !membersErr && (
-              <div className="border border-gray-100 rounded overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      <th className="text-left px-3 py-2 text-gray-600">Member</th>
-                      <th className="text-left px-3 py-2 text-gray-600">Role</th>
-                      <th className="text-right px-3 py-2 text-gray-600">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((m) => (
-                      <tr key={m.id} className="border-b last:border-0">
-                        <td className="px-3 py-2">
-                          <div className="text-gray-900">
-                            <span className="font-medium mr-2">{m.user?.fullName || m.userId}</span>
-                            <span className="text-xs text-gray-500 font-mono">{m.userId}</span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2">
+              {query && assignable.length > 0 && (
+                <div className="mb-3 max-h-40 overflow-y-auto border border-gray-100 rounded">
+                  {assignable.map((a) => (
+                    <div key={a.userId} className="flex items-center justify-between px-3 py-2 border-b last:border-0">
+                      <div className="text-sm">
+                        <div className="font-medium">{a.fullName}</div>
+                        <div className="text-gray-500 text-xs">{a.email}</div>
+                      </div>
+                      <button
+                        className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-1.5 text-xs"
+                        onClick={() => addMember(a.userId)}
+                        disabled={assignLoading}
+                        title="Add to department"
+                      >
+                        <UserPlus size={14} className="mr-1" /> Add
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {membersLoading && <Spinner size="sm" label="Loading members" />}
+              {membersErr && <div className="text-sm text-rose-600">{membersErr}</div>}
+              {!membersLoading && !membersErr && (
+                <div className="border border-gray-100 rounded overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-3 py-2 text-gray-600">Member</th>
+                        <th className="text-left px-3 py-2 text-gray-600">Role</th>
+                        <th className="text-right px-3 py-2 text-gray-600">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {members.map((m) => (
+                        <tr key={m.id} className="border-b last:border-0">
+                          <td className="px-3 py-2">
+                            <div className="text-gray-900">
+                              <span className="font-medium mr-2">{m.user?.fullName || m.userId}</span>
+                              <span className="text-xs text-gray-500 font-mono">{m.userId}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
                             <Dropdown
                               value={m.role}
                               onChange={(v) => updateRole(m.userId, v as any)}
@@ -368,29 +348,30 @@ export const AdminPanelPage: React.FC = () => {
                               ]}
                               title="Change role"
                             />
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <button
-                            className="text-rose-600 hover:text-rose-700"
-                            onClick={() => removeMember(m.userId)}
-                            title="Remove from department"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {members.length === 0 && (
-                      <tr>
-                        <td colSpan={3} className="px-3 py-6 text-center text-gray-500">No members yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              className="text-rose-600 hover:text-rose-700"
+                              onClick={() => removeMember(m.userId)}
+                              title="Remove from department"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {members.length === 0 && (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-6 text-center text-gray-500">No members yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

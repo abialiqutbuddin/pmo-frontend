@@ -11,6 +11,7 @@ import { departmentsService } from '../services/departments';
 import { eventsService } from '../services/events';
 import type { TaskItem } from '../types/task';
 import { Dropdown } from '../components/ui/Dropdown';
+import { Page } from '../components/layout/Page';
 
 type Scale = 'day' | 'week';
 type Theme = 'default' | 'pastel' | 'contrast';
@@ -205,7 +206,7 @@ export const GanttPage: React.FC = () => {
   // (Bars have their own inline tooltip; columns shouldn't show tips.)
 
   return (
-    <div className="p-6">
+    <Page>
       {/* Controls */}
       <div className="flex items-start gap-3 mb-4">
         <div>
@@ -447,6 +448,6 @@ export const GanttPage: React.FC = () => {
           {tip.text}
         </div>
       )}
-    </div>
+    </Page>
   );
 };

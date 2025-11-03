@@ -8,10 +8,12 @@ export type ChatMessageVM = {
   id: string;
   conversationId: string;
   authorId: string;
+  author?: { id: string; fullName?: string; email?: string; itsId?: string; profileImage?: string };
   body?: string | null;
   parentId?: string | null;
   createdAt: string;
   attachments?: { id: string; originalName: string; mimeType: string; objectKey?: string; size?: number }[];
+  isSystem?: boolean;
 };
 
 interface ChatState {
@@ -22,11 +24,13 @@ interface ChatState {
   connecting: boolean;
   error?: string | null;
   dmNames: Record<string, string>; // conversationId -> other participant's name for DIRECT
-  lastMsg: Record<string, { content?: string; createdAt?: string }>; // conversationId -> preview
-  participants: Record<string, Record<string, { id: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; designation?: string }>>;
+  lastMsg: Record<string, { id?: string; authorId?: string; content?: string; createdAt?: string }>; // conversationId -> preview
+  unread: Record<string, number>;
+  participants: Record<string, Record<string, { id: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; designation?: string; lastReadAt?: string | null }>>;
   cursors: Record<string, string | null>; // conversationId -> earliest loaded createdAt
   hasMore: Record<string, boolean>; // conversationId -> whether older messages may exist
   scrollPos: Record<string, number>; // conversationId -> scrollTop
+  pendingJoin: Record<string, true>;
 
   connect: () => Promise<void>;
   loadConversations: () => Promise<void>;
@@ -53,10 +57,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   error: null,
   dmNames: {},
   lastMsg: {},
+  unread: {},
   participants: {},
   cursors: {},
   hasMore: {},
   scrollPos: {},
+  pendingJoin: {},
 
   connect: async () => {
     const token = useAuthStore.getState().accessToken;
@@ -65,6 +71,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (getChatSocket()?.connected) return;
     set({ connecting: true, error: null });
     const s = connectChatSocket(token, eventId);
+    s.on('connect', () => {
+      try {
+        const ids = new Set<string>();
+        const pending = Object.keys(get().pendingJoin || {});
+        pending.forEach((id) => ids.add(id));
+        (get().conversations || []).forEach((c) => ids.add(c.id));
+        ids.forEach((id) => s.emit('conversation.join', { conversationId: id }));
+        set({ pendingJoin: {} });
+      } catch {}
+    });
     s.on('connect_error', (err) => set({ error: err?.message || 'Socket error' }));
     s.on('message.new', (msg: any) => {
       set((st) => {
@@ -73,13 +89,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
           id: msg.id,
           conversationId: msg.conversationId,
           authorId: msg.authorId,
+          author: msg.author,
           body: msg.body,
           parentId: msg.parentId,
           createdAt: msg.createdAt,
+          isSystem: !!msg.isSystem,
         });
-        const lastMsg = { ...st.lastMsg, [msg.conversationId]: { content: msg.body, createdAt: msg.createdAt } };
-        return { messages: { ...st.messages, [msg.conversationId]: arr }, lastMsg };
+        const lastMsg = { ...st.lastMsg, [msg.conversationId]: { id: msg.id, authorId: msg.authorId, content: msg.body, createdAt: msg.createdAt } };
+        const meId = useAuthStore.getState().currentUser?.id;
+        const isActive = st.activeId === msg.conversationId;
+        const unread = { ...st.unread };
+        if (!isActive && msg.authorId !== meId) unread[msg.conversationId] = (unread[msg.conversationId] || 0) + 1;
+        // reorder: move this conversation to the top
+        const conversations = [...st.conversations];
+        const idx = conversations.findIndex((c) => c.id === msg.conversationId);
+        if (idx > 0) {
+          const [moved] = conversations.splice(idx, 1);
+          conversations.unshift(moved);
+        }
+        return { conversations, messages: { ...st.messages, [msg.conversationId]: arr }, lastMsg, unread };
       });
+      try {
+        // If it's a system message for add/remove, refresh participants map
+        if (msg?.isSystem && typeof msg.body === 'string' && /^(added |removed )/i.test(msg.body.trim())) {
+          const fn = get().loadParticipants;
+          if (typeof fn === 'function') fn(msg.conversationId);
+        }
+      } catch {}
     });
     s.on('message.attachment', (p: { conversationId: string; messageId: string; attachments: any[] }) => {
       set((st) => {
@@ -90,6 +126,61 @@ export const useChatStore = create<ChatState>((set, get) => ({
           arr[idx] = { ...prev, attachments: p.attachments };
         }
         return { messages: { ...st.messages, [p.conversationId]: arr } };
+      });
+    });
+    s.on('conversation.read', (p: { conversationId: string; userId: string; at: string }) => {
+      set((st) => {
+        const pm = st.participants[p.conversationId] ? { ...st.participants[p.conversationId] } : {};
+        const row = pm[p.userId] || { id: p.userId } as any;
+        pm[p.userId] = { ...row, lastReadAt: p.at };
+        const meId = useAuthStore.getState().currentUser?.id;
+        const unread = { ...st.unread };
+        if (p.userId === meId) unread[p.conversationId] = 0;
+        return { participants: { ...st.participants, [p.conversationId]: pm }, unread };
+      });
+    });
+    // Participants list changes broadcast from server
+    s.on('participants.updated', (p: { conversationId: string }) => {
+      try { const fn = get().loadParticipants; if (typeof fn === 'function') fn(p.conversationId); } catch {}
+    });
+    // New conversation invited to me (e.g., added to a group)
+    s.on('conversation.invited', (c: any) => {
+      set((st) => {
+        // If this conversation already exists, ignore or update
+        const exists = st.conversations.some((x) => x.id === c.id);
+        const conversations = exists ? st.conversations.map((x) => (x.id === c.id ? { ...x, ...c } : x)) : [{ ...c }, ...st.conversations];
+        const participants = { ...st.participants, [c.id]: Object.fromEntries((c.participants || []).map((p: any) => [p.userId, { id: p.userId, fullName: p.user?.fullName, email: p.user?.email, lastReadAt: p.lastReadAt || null }])) };
+        const lastMsg = { ...st.lastMsg } as any;
+        if (c.lastMessage) {
+          lastMsg[c.id] = { id: c.lastMessage.id, authorId: c.lastMessage.authorId, content: c.lastMessage.body, createdAt: c.lastMessage.createdAt };
+        }
+        return { conversations, participants, lastMsg };
+      });
+      // auto-join the room and prefetch messages
+      try {
+        const s2 = getChatSocket();
+        if (s2?.connected) s2.emit('conversation.join', { conversationId: c.id });
+      } catch {}
+      // Preload minimal messages for preview accuracy
+      try { get().loadMessages(c.id); } catch {}
+    });
+    // Server denied joining a conversation (e.g., removed member)
+    s.on('conversation.join-denied', (p: { conversationId: string }) => {
+      // Clear my read state and participants map entry for me; UI will disable input
+      set((st) => {
+        const parts = { ...(st.participants[p.conversationId] || {}) } as any;
+        const meId = useAuthStore.getState().currentUser?.id;
+        if (meId && parts[meId]) delete parts[meId];
+        return { participants: { ...st.participants, [p.conversationId]: parts } };
+      });
+    });
+    // Server kicked me from a conversation
+    s.on('conversation.kicked', (p: { conversationId: string }) => {
+      set((st) => {
+        const parts = { ...(st.participants[p.conversationId] || {}) } as any;
+        const meId = useAuthStore.getState().currentUser?.id;
+        if (meId && parts[meId]) delete parts[meId];
+        return { participants: { ...st.participants, [p.conversationId]: parts } };
       });
     });
     set({ connecting: false });
@@ -113,10 +204,43 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
     if (prevEventId !== eventId) set({ eventId });
     const list = await chatService.listConversations(eventId).catch(() => []);
-    set({ conversations: list });
+    // Prime last message map and participants' lastReadAt from server response
+    set((st) => {
+      const lastMsg: any = { ...st.lastMsg };
+      const participants: any = { ...st.participants };
+      const unread: any = { ...st.unread };
+      for (const c of list as any[]) {
+        if (c.lastMessage) {
+          lastMsg[c.id] = {
+            id: c.lastMessage.id,
+            authorId: c.lastMessage.authorId,
+            content: c.lastMessage.body,
+            createdAt: c.lastMessage.createdAt,
+          };
+        }
+        if (Array.isArray(c.participants)) {
+          const map = participants[c.id] || {};
+          for (const p of c.participants) {
+            const row = map[p.userId] || { id: p.userId };
+            map[p.userId] = { ...row, lastReadAt: p.lastReadAt || null, fullName: p.user?.fullName, email: p.user?.email };
+          }
+          participants[c.id] = map;
+        }
+        if (typeof (c as any).unreadCount === 'number') unread[c.id] = (c as any).unreadCount;
+      }
+      return { conversations: list as any, lastMsg, participants, unread };
+    });
     // auto-join rooms
     const s = getChatSocket();
-    list.forEach((c) => s?.emit('conversation.join', { conversationId: c.id }));
+    if (s?.connected) {
+      list.forEach((c) => s.emit('conversation.join', { conversationId: c.id }));
+    } else {
+      set((st) => {
+        const next = { ...(st.pendingJoin || {}) } as Record<string, true>;
+        (list as any[]).forEach((c) => { next[c.id] = true; });
+        return { pendingJoin: next };
+      });
+    }
 
     // compute DM display names for DIRECT conversations and hydrate participants map for sidebar avatars
     (async () => {
@@ -153,47 +277,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     })();
 
-    // load last message previews
-    (async () => {
-      const previews = await Promise.all(
-        list.map(async (c) => {
-          try {
-            const res = await chatService.listMessages(c.id, { limit: 1 });
-            const m = (res.items || [])[0];
-            return [c.id, { content: m?.body, createdAt: m?.createdAt }] as const;
-          } catch {
-            return [c.id, { content: undefined, createdAt: undefined }] as const;
-          }
-        }),
-      );
-      set((st) => ({ lastMsg: { ...st.lastMsg, ...Object.fromEntries(previews) } }));
-    })();
+    // skip extra preview fetch; we already got lastMessage above
   },
 
   join: (conversationId) => {
     const s = getChatSocket();
-    s?.emit('conversation.join', { conversationId });
+    if (s?.connected) s.emit('conversation.join', { conversationId });
+    else set((st) => ({ pendingJoin: { ...(st.pendingJoin || {}), [conversationId]: true } }));
   },
 
-  setActive: (id) => set({ activeId: id }),
+  setActive: (id) => set((st) => ({ activeId: id, unread: { ...st.unread, [id]: 0 } })),
 
   send: async (conversationId, body) => {
     const s = getChatSocket();
     if (s?.connected) {
       s.emit('message.send', { conversationId, body });
     } else {
-      await chatService.sendMessage({ conversationId, body });
+      const msg: any = await chatService.sendMessage({ conversationId, body }).catch(()=>null);
+      if (msg) {
+        set((st) => {
+          const arr = st.messages[conversationId] ? [...st.messages[conversationId]] : [];
+          arr.push({ id: msg.id, conversationId, authorId: msg.authorId, body: msg.body, parentId: msg.parentId, createdAt: msg.createdAt });
+          const lastMsg = { ...st.lastMsg, [conversationId]: { id: msg.id, authorId: msg.authorId, content: msg.body, createdAt: msg.createdAt } };
+          const conversations = [...st.conversations];
+          const idx = conversations.findIndex((c) => c.id === conversationId);
+          if (idx > 0) { const [moved] = conversations.splice(idx, 1); conversations.unshift(moved); }
+          return { conversations, messages: { ...st.messages, [conversationId]: arr }, lastMsg };
+        });
+      }
     }
   },
 
   loadMessages: async (conversationId) => {
     try {
       const json = await chatService.listMessages(conversationId, { limit: 50 });
-      set((st) => ({
-        messages: { ...st.messages, [conversationId]: (json.items || []) },
-        cursors: { ...st.cursors, [conversationId]: json.nextCursor || null },
-        hasMore: { ...st.hasMore, [conversationId]: !!(json.items && json.items.length) },
-      }));
+      set((st) => {
+        const items = json.items || [];
+        const last = items.length ? items[items.length - 1] : null;
+        const lm = last ? { id: last.id, authorId: last.authorId, content: last.body, createdAt: last.createdAt } : undefined as any;
+        return {
+          messages: { ...st.messages, [conversationId]: items },
+          cursors: { ...st.cursors, [conversationId]: json.nextCursor || null },
+          hasMore: { ...st.hasMore, [conversationId]: !!items.length },
+          lastMsg: lm ? { ...st.lastMsg, [conversationId]: lm } : st.lastMsg,
+        };
+      });
     } catch (e) {
       // swallow load errors, keep UI responsive
     }
@@ -202,7 +330,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   loadParticipants: async (conversationId) => {
     try {
       const rows: any[] = await chatService.listParticipants(conversationId);
-      const map: Record<string, { id: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; designation?: string }> = {};
+      const map: Record<string, { id: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; designation?: string; lastReadAt?: string | null; role?: string }> = {};
       rows.forEach((r: any) => {
         map[r.userId] = {
           id: r.user?.id || r.userId,
@@ -211,9 +339,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           itsId: r.user?.itsId,
           profileImage: r.user?.profileImage,
           designation: r.user?.designation,
+          lastReadAt: r.lastReadAt || null,
+          role: r.role,
         };
       });
-      set((st) => ({ participants: { ...st.participants, [conversationId]: map } }));
+      const meId = useAuthStore.getState().currentUser?.id;
+      const conv = get().conversations.find((c) => c.id === conversationId);
+      if (conv?.kind === 'DIRECT') {
+        const other = rows.find((r: any) => r.userId !== meId)?.user;
+        const name = other?.fullName || other?.email || 'Direct';
+        set((st) => ({
+          participants: { ...st.participants, [conversationId]: map },
+          dmNames: { ...st.dmNames, [conversationId]: name },
+        }));
+      } else {
+        set((st) => ({ participants: { ...st.participants, [conversationId]: map } }));
+      }
     } catch {
       // ignore
     }
@@ -224,7 +365,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const conv: any = await chatService.startDirect(eventId, userId);
       set((st) => ({ conversations: [conv, ...st.conversations.filter(c=>c.id!==conv.id)], activeId: conv.id }));
       const s = getChatSocket();
-      s?.emit('conversation.join', { conversationId: conv.id });
+      if (s?.connected) s.emit('conversation.join', { conversationId: conv.id });
+      else set((st) => ({ pendingJoin: { ...(st.pendingJoin || {}), [conv.id]: true } }));
+      // Immediately hydrate participants and DM display name
+      try {
+        const rows: any[] = await chatService.listParticipants(conv.id);
+        const map: Record<string, { id: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; designation?: string; lastReadAt?: string | null; role?: string }> = {};
+        rows.forEach((r: any) => {
+          map[r.userId] = {
+            id: r.user?.id || r.userId,
+            fullName: r.user?.fullName,
+            email: r.user?.email,
+            itsId: r.user?.itsId,
+            profileImage: r.user?.profileImage,
+            designation: r.user?.designation,
+            lastReadAt: r.lastReadAt || null,
+            role: r.role,
+          };
+        });
+        const meId = useAuthStore.getState().currentUser?.id;
+        const other = rows.find((r: any) => r.userId !== meId)?.user;
+        const name = other?.fullName || other?.email || 'Direct';
+        set((st) => ({
+          participants: { ...st.participants, [conv.id]: map },
+          dmNames: { ...st.dmNames, [conv.id]: name },
+        }));
+      } catch {}
       return conv.id as string;
     } catch {
       return null;

@@ -7,14 +7,19 @@ import { tasksService } from '../services/tasks';
 import { bus } from '../lib/eventBus';
 import { departmentsService } from '../services/departments';
 import { eventsService } from '../services/events';
-import type { TaskItem, TaskStatus } from '../types/task';
+import type { TaskItem, TaskStatus, TaskType } from '../types/task';
 import type { DepType } from '../services/tasks';
-import { Plus, Trash2, Pencil, Clock, Flag, User, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { Plus, Trash2, Pencil, Calendar, Flag, User, LayoutGrid, List as ListIcon, Paperclip, X } from 'lucide-react';
 import { Dropdown } from '../components/ui/Dropdown';
+import { UserAvatar } from '../components/ui/UserAvatar';
 import { Eye } from 'lucide-react';
 import { Spinner } from '../components/ui/Spinner';
 import { TaskDetailsDrawer } from '../components/tasks/TaskDetailsDrawer';
+import { SideDrawer } from '../components/ui/SideDrawer';
 import { TasksBoardView } from '../components/tasks/TaskBoardView';
+import { Page } from '../components/layout/Page';
+import { VenueSelect } from '../components/tasks/VenueSelect';
+import { attachmentsService } from '../services/attachments';
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: 'todo', label: 'To Do' },
@@ -28,10 +33,44 @@ function fmt(iso?: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString();
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+function isoToDateInput(iso?: string | null) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function dateOnlyToISO(dateStr?: string | null) {
+  if (!dateStr) return undefined;
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
 }
 
 const PRIORITY_LABEL: Record<number, string> = { 1: 'Critical', 2: 'High', 3: 'Medium', 4: 'Low', 5: 'Very Low' };
+
+const TYPE_OPTIONS: { value: TaskType; label: string }[] = [
+  { value: 'issue', label: 'Issue' },
+  { value: 'new_task', label: 'New Task' },
+  { value: 'taujeeh', label: 'Taujeeh' },
+  { value: 'improvement', label: 'Improvement' },
+];
+
+const TYPE_COLOR: Record<TaskType, string> = {
+  issue: 'bg-rose-100 text-rose-800 border-rose-300',
+  new_task: 'bg-blue-100 text-blue-800 border-blue-300',
+  taujeeh: 'bg-amber-100 text-amber-800 border-amber-300',
+  improvement: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+};
 
 const PriorityBadge: React.FC<{ p: number }> = ({ p }) => {
   const color = p === 1 ? 'bg-rose-600' : p === 2 ? 'bg-orange-500' : p === 3 ? 'bg-amber-500' : p === 4 ? 'bg-emerald-500' : 'bg-gray-500';
@@ -49,6 +88,8 @@ type CreateForm = {
   startAt: string;
   dueAt: string;
   assigneeId: string;
+  venueId: string;
+  type: TaskType;
 };
 
 export const TasksPage: React.FC = () => {
@@ -60,13 +101,17 @@ export const TasksPage: React.FC = () => {
   const setTasksState = usePageStateStore((s) => s.setTasks);
   const deptId = tasksState.deptId;
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [tasksByDept, setTasksByDept] = useState<Record<string, TaskItem[]>>({});
   const [memberOptions, setMemberOptions] = useState<{ value: string; label: string }[]>([]);
   const [memberNameById, setMemberNameById] = useState<Record<string, string>>({});
+  const [venueNameById, setVenueNameById] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const statusFilter = tasksState.statusFilter;
   const priorityFilter = tasksState.priorityFilter;
   const q = tasksState.q;
+  const overdueOnly = !!tasksState.overdueOnly;
+  const memberFilter = tasksState.memberFilter || 'all';
 
   //view
   const [viewing, setViewing] = useState<TaskItem | null>(null);
@@ -74,12 +119,13 @@ export const TasksPage: React.FC = () => {
   // Create/edit modal
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateForm>({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '' });
+  const [createForm, setCreateForm] = useState<CreateForm>({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '', venueId: '', type: 'new_task' });
   const [createDeps, setCreateDeps] = useState<{ upstreamId: string; depType: DepType }[]>([]);
+  const [createFiles, setCreateFiles] = useState<{ file: File; url: string; progress: number }[]>([]);
 
   // Edit modal
   const [editing, setEditing] = useState<TaskItem | null>(null);
-  const [editForm, setEditForm] = useState<CreateForm & { progressPct: number; status: TaskStatus }>({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '', progressPct: 0, status: 'todo' });
+  const [editForm, setEditForm] = useState<CreateForm & { progressPct: number; status: TaskStatus }>({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '', venueId: '', type: 'new_task', progressPct: 0, status: 'todo' });
   const [deps, setDeps] = useState<{ blockers: { upstreamId: string; depType: DepType; task: TaskItem }[] } | null>(null);
   const [allTasksForDeps, setAllTasksForDeps] = useState<TaskItem[]>([]);
   const [newDep, setNewDep] = useState<{ upstreamId: string; depType: DepType }>({ upstreamId: '', depType: 'finish_to_start' });
@@ -102,13 +148,40 @@ export const TasksPage: React.FC = () => {
     }
   }, [accessibleDepts, myMemberships, deptId, setTasksState]);
 
+  // Reset member filter when department changes
+  useEffect(() => {
+    setTasksState({ memberFilter: 'all' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deptId]);
+
   async function loadTasks(force?: boolean) {
     if (!currentEventId || !deptId) return;
     setLoading(true);
     setErr(null);
     try {
-      const data = await tasksService.list(currentEventId, deptId, { force });
-      setTasks(data || []);
+      if (deptId === 'ALL') {
+        const res = await Promise.all(
+          accessibleDepts.map(async (d) => {
+            const rows = await tasksService.list(currentEventId, d.id, {
+              force,
+              assigneeId: memberFilter !== 'all' ? (memberFilter as string) : undefined,
+            });
+            return { id: d.id, rows: (rows || []).map((t) => ({ ...t, departmentId: d.id })) };
+          })
+        );
+        const by: Record<string, TaskItem[]> = {};
+        for (const r of res) by[r.id] = r.rows;
+        setTasksByDept(by);
+        setTasks(res.flatMap((r) => r.rows));
+      } else {
+        const data = await tasksService.list(currentEventId, deptId, {
+          force,
+          assigneeId: memberFilter !== 'all' ? (memberFilter as string) : undefined,
+        });
+        const withDept = (data || []).map((t) => ({ ...t, departmentId: deptId }));
+        setTasks(withDept);
+        setTasksByDept({ [deptId]: withDept });
+      }
     } catch (e: any) {
       setErr(e?.message || 'Failed to load tasks');
     } finally {
@@ -120,11 +193,11 @@ export const TasksPage: React.FC = () => {
     loadTasks();
     // subscribe to task changes (placeholder realtime bus)
     const off = bus.on('tasks:changed', ({ eventId, departmentId }: any) => {
-      if (eventId === currentEventId && departmentId === deptId) loadTasks(true);
+      if (eventId === currentEventId && (deptId === 'ALL' || departmentId === deptId)) loadTasks(true);
     });
     return () => off();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentEventId, deptId]);
+  }, [currentEventId, deptId, memberFilter, accessibleDepts]);
 
   // Load names: prefer department members; fall back to event members for names when assignee isn't in dept
   useEffect(() => {
@@ -132,13 +205,13 @@ export const TasksPage: React.FC = () => {
     if (!currentEventId || !deptId) return;
     (async () => {
       try {
-        const deptRows = await departmentsService.members.list(currentEventId, deptId).catch(() => []);
+        const deptRows = deptId === 'ALL' ? [] : await departmentsService.members.list(currentEventId, deptId).catch(() => []);
         const eventRows = await eventsService.members.list(currentEventId).catch(() => []);
         if (!mounted) return;
         const deptList = Array.isArray(deptRows) ? deptRows : [];
         const eventList = Array.isArray(eventRows) ? eventRows : [];
-        // Options for assignee: department members only
-        const opts = deptList.map((m) => ({ value: m.userId, label: m.user?.fullName || m.userId }));
+        // Options for assignee: department members only (or event-wide if ALL)
+        const opts = (deptId === 'ALL' ? eventList : deptList).map((m: any) => ({ value: m.userId, label: m.user?.fullName || m.userId }));
         setMemberOptions([{ value: '', label: 'Unassigned' }, ...opts]);
         // Name map for rendering: union of dept + event members
         const map: Record<string, string> = {};
@@ -159,13 +232,35 @@ export const TasksPage: React.FC = () => {
     };
   }, [currentEventId, deptId]);
 
+  // Load venues for current event to display names in list
+  useEffect(() => {
+    let mounted = true;
+    if (!currentEventId) return;
+    import('../services/venues').then(({ venuesService }) =>
+      venuesService.list(currentEventId!).then((rows) => {
+        if (!mounted) return;
+        const m: Record<string, string> = {};
+        for (const v of rows || []) m[v.id] = v.name;
+        setVenueNameById(m);
+      }).catch(() => setVenueNameById({}))
+    );
+    return () => { mounted = false };
+  }, [currentEventId, tasks]);
+
   // RBAC helpers
   const canCreate = useMemo(() => {
-    if (!deptId) return false;
+    if (!deptId || deptId === 'ALL') return false;
     if (isSuperAdmin) return true;
     const roles = myMemberships.filter((m) => !m.departmentId || m.departmentId === deptId).map((m) => m.role);
     return roles.includes('OWNER') || roles.includes('PMO_ADMIN') || roles.includes('DEPT_HEAD') || roles.includes('DEPT_MEMBER');
   }, [isSuperAdmin, myMemberships, deptId]);
+
+  const canViewAllInDept = useMemo(() => {
+    if (!deptId) return false;
+    if (isSuperAdmin || canAdminEvent) return true;
+    const roles = myMemberships.filter((m) => !m.departmentId || m.departmentId === deptId).map((m) => m.role);
+    return roles.includes('OWNER') || roles.includes('PMO_ADMIN') || roles.includes('DEPT_HEAD');
+  }, [isSuperAdmin, canAdminEvent, myMemberships, deptId]);
 
   const canEditTask = (t: TaskItem) => {
     if (isSuperAdmin) return true;
@@ -177,15 +272,19 @@ export const TasksPage: React.FC = () => {
     return false;
   };
 
-  const filtered = useMemo(() => {
+  function matchesFilters(t: TaskItem) {
     const term = q.trim().toLowerCase();
-    return tasks.filter((t) => {
-      const matchStatus = statusFilter === 'all' ? true : t.status === statusFilter;
-      const matchPriority = priorityFilter === 'all' ? true : t.priority === priorityFilter;
-      const matchText = !term || t.title.toLowerCase().includes(term) || (t.description || '').toLowerCase().includes(term);
-      return matchStatus && matchPriority && matchText;
-    });
-  }, [tasks, statusFilter, priorityFilter, q]);
+    const now = Date.now();
+    const matchStatus = statusFilter === 'all' ? true : t.status === statusFilter;
+    const matchPriority = priorityFilter === 'all' ? true : t.priority === priorityFilter;
+    const matchMember = memberFilter === 'all' ? true : t.assigneeId === memberFilter;
+    const isOverdue = !!t.dueAt && new Date(t.dueAt).getTime() < now && t.status !== 'done' && t.status !== 'canceled';
+    const matchOverdue = overdueOnly ? isOverdue : true;
+    const matchText = !term || t.title.toLowerCase().includes(term) || (t.description || '').toLowerCase().includes(term);
+    return matchStatus && matchPriority && matchMember && matchOverdue && matchText;
+  }
+
+  const filtered = useMemo(() => tasks.filter(matchesFilters), [tasks, statusFilter, priorityFilter, memberFilter, overdueOnly, q]);
 
   async function createTask() {
     if (!currentEventId || !deptId) return;
@@ -196,11 +295,24 @@ export const TasksPage: React.FC = () => {
         title: createForm.title.trim(),
         description: createForm.description?.trim() || undefined,
         priority: Number(createForm.priority) || 3,
-        startAt: createForm.startAt ? new Date(createForm.startAt).toISOString() : undefined,
-        dueAt: createForm.dueAt ? new Date(createForm.dueAt).toISOString() : undefined,
+        type: createForm.type,
+        startAt: createForm.startAt ? dateOnlyToISO(createForm.startAt) : undefined,
+        dueAt: createForm.dueAt ? dateOnlyToISO(createForm.dueAt) : undefined,
         assigneeId: createForm.assigneeId?.trim() || undefined,
+        venueId: createForm.venueId?.trim() || undefined,
       };
       const created = await tasksService.create(currentEventId, deptId, payload);
+      // Upload any selected files
+      for (let i = 0; i < createFiles.length; i++) {
+        const item = createFiles[i];
+        await attachmentsService.uploadWithProgress(
+          currentEventId,
+          'Task',
+          created.id,
+          item.file,
+          (pct) => setCreateFiles((prev) => prev.map((p, idx) => (idx === i ? { ...p, progress: pct } : p)))
+        ).catch(() => {});
+      }
       // link dependencies if any
       for (const d of createDeps) {
         if (!d.upstreamId) continue;
@@ -209,8 +321,13 @@ export const TasksPage: React.FC = () => {
         } catch { }
       }
       setShowCreate(false);
-      setCreateForm({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '' });
+      setCreateForm({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '', venueId: '', type: 'new_task' });
       setCreateDeps([]);
+      // cleanup previews
+      setCreateFiles((prev) => {
+        prev.forEach((p) => URL.revokeObjectURL(p.url));
+        return [];
+      });
       await loadTasks(true);
     } catch (e) {
       // surface minimal error
@@ -219,11 +336,26 @@ export const TasksPage: React.FC = () => {
       setCreating(false);
     }
   }
+  function onPickCreateFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const next = Array.from(files).map((f) => ({ file: f, url: URL.createObjectURL(f), progress: 0 }));
+    setCreateFiles((prev) => [...prev, ...next]);
+  }
+  function removeCreateFile(idx: number) {
+    setCreateFiles((prev) => {
+      const copy = [...prev];
+      const [rm] = copy.splice(idx, 1);
+      if (rm) URL.revokeObjectURL(rm.url);
+      return copy;
+    });
+  }
 
   async function changeStatus(task: TaskItem, status: TaskStatus) {
-    if (!currentEventId || !deptId) return;
+    if (!currentEventId) return;
+    const targetDept = task.departmentId || deptId;
+    if (!targetDept || targetDept === 'ALL') return;
     try {
-      const res = await tasksService.changeStatus(currentEventId, deptId, task.id, { status });
+      const res = await tasksService.changeStatus(currentEventId, targetDept, task.id, { status });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: res.status, progressPct: res.progressPct } : t)));
     } catch (e) {
       alert('Not allowed to change status');
@@ -231,17 +363,21 @@ export const TasksPage: React.FC = () => {
   }
 
   async function updateTask(task: TaskItem, patch: Partial<TaskItem>) {
-    if (!currentEventId || !deptId) return;
+    if (!currentEventId) return;
+    const targetDept = task.departmentId || deptId;
+    if (!targetDept || targetDept === 'ALL') return;
     try {
       const payload: any = {
         title: patch.title,
         description: patch.description,
         priority: patch.priority,
-        startAt: patch.startAt === '' ? null : patch.startAt ? new Date(patch.startAt).toISOString() : undefined,
-        dueAt: patch.dueAt === '' ? null : patch.dueAt ? new Date(patch.dueAt).toISOString() : undefined,
+        type: (patch as any).type,
+        startAt: patch.startAt === '' ? null : patch.startAt ? dateOnlyToISO(patch.startAt) : undefined,
+        dueAt: patch.dueAt === '' ? null : patch.dueAt ? dateOnlyToISO(patch.dueAt) : undefined,
         assigneeId: patch.assigneeId === '' ? null : patch.assigneeId ?? undefined,
+        venueId: (patch as any).venueId === '' ? null : (patch as any).venueId ?? undefined,
       };
-      const res = await tasksService.update(currentEventId, deptId, task.id, payload);
+      const res = await tasksService.update(currentEventId, targetDept, task.id, payload);
       // Re-fetch or optimistic merge
       await loadTasks(true);
       return res;
@@ -257,9 +393,11 @@ export const TasksPage: React.FC = () => {
 
   // add
   async function changeStatusFromDrawer(task: TaskItem, status: TaskStatus) {
-    if (!currentEventId || !deptId) return;
+    if (!currentEventId) return;
+    const targetDept = task.departmentId || deptId;
+    if (!targetDept || targetDept === 'ALL') return;
     try {
-      const res = await tasksService.changeStatus(currentEventId, deptId, task.id, { status });
+      const res = await tasksService.changeStatus(currentEventId, targetDept, task.id, { status });
       // reflect in list + drawer
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: res.status, progressPct: res.progressPct } : t)));
       setViewing((cur) => (cur && cur.id === task.id ? { ...cur, status: res.status, progressPct: res.progressPct } : cur));
@@ -274,30 +412,36 @@ export const TasksPage: React.FC = () => {
       title: t.title,
       description: t.description || '',
       priority: t.priority,
-      startAt: t.startAt ? new Date(t.startAt).toISOString().slice(0, 16) : '',
-      dueAt: t.dueAt ? new Date(t.dueAt).toISOString().slice(0, 16) : '',
+      startAt: isoToDateInput(t.startAt),
+      dueAt: isoToDateInput(t.dueAt),
       assigneeId: t.assigneeId || '',
+      venueId: t.venueId || '',
+      type: (t.type as TaskType) || 'new_task',
       progressPct: t.progressPct || 0,
       status: t.status,
     });
     // load dependencies + candidate tasks
-    if (currentEventId && deptId) {
+    if (currentEventId) {
+      const targetDept = t.departmentId || deptId;
+      if (!targetDept || targetDept === 'ALL') return;
       tasksService.dependencies
-        .list(currentEventId, deptId, t.id)
+        .list(currentEventId, targetDept, t.id)
         .then((d) => setDeps({ blockers: d.blockers || [] }))
         .catch(() => setDeps({ blockers: [] }));
       tasksService
-        .list(currentEventId, deptId)
+        .list(currentEventId, targetDept)
         .then((rows) => setAllTasksForDeps((rows || []).filter((x) => x.id !== t.id)))
         .catch(() => setAllTasksForDeps([]));
     }
   }
 
   async function removeTask(task: TaskItem) {
-    if (!currentEventId || !deptId) return;
+    if (!currentEventId) return;
+    const targetDept = task.departmentId || deptId;
+    if (!targetDept || targetDept === 'ALL') return;
     if (!confirm('Delete this task?')) return;
     try {
-      await tasksService.remove(currentEventId, deptId, task.id);
+      await tasksService.remove(currentEventId, targetDept, task.id);
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
     } catch (e) {
       alert('Failed to delete task');
@@ -308,7 +452,11 @@ export const TasksPage: React.FC = () => {
     <Dropdown
       value={deptId}
       onChange={(v) => setTasksState({ deptId: v })}
-      options={accessibleDepts.map((d) => ({ value: d.id, label: d.name }))}
+      options={(() => {
+        const base = accessibleDepts.map((d) => ({ value: d.id, label: d.name }));
+        const canAll = isSuperAdmin || canAdminEvent || accessibleDepts.length > 1;
+        return canAll ? [{ value: 'ALL', label: 'All Departments' }, ...base] : base;
+      })()}
       placeholder={accessibleDepts.length ? undefined : 'No department'}
       title="Choose department"
       fullWidth={false}
@@ -316,7 +464,7 @@ export const TasksPage: React.FC = () => {
   );
 
   return (
-    <div className="p-6">
+    <Page>
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="text-2xl font-semibold mr-2">Tasks</div>
         <div className="ml-auto flex items-center gap-3">
@@ -349,11 +497,30 @@ export const TasksPage: React.FC = () => {
               title="Search by title or description"
             />
           </div>
+          <label className="inline-flex items-center text-sm text-gray-700">
+            <input
+              type="checkbox"
+              className="mr-2"
+              checked={overdueOnly}
+              onChange={(e) => setTasksState({ overdueOnly: e.target.checked })}
+            />
+            Overdue only
+          </label>
+          {canViewAllInDept && (
+            <div className="flex items-center gap-2" title="Filter by member">
+              <span className="text-xs text-gray-600">Member</span>
+              <Dropdown
+                value={String(memberFilter)}
+                onChange={(v) => setTasksState({ memberFilter: v as any })}
+                options={[{ value: 'all', label: 'All Members' }, ...memberOptions.slice(1)]}
+              />
+            </div>
+          )}
           <button
-            className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm"
+            className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm disabled:opacity-60"
             onClick={() => setShowCreate(true)}
             disabled={!canCreate}
-            title={canCreate ? 'Create task' : 'You do not have permission to create tasks'}
+            title={canCreate ? 'Create task' : (deptId === 'ALL' ? 'Select a department to create tasks' : 'You do not have permission to create tasks')}
           >
             <Plus size={16} className="mr-1" /> New Task
           </button>
@@ -365,84 +532,247 @@ export const TasksPage: React.FC = () => {
 
       <div className="inline-flex items-center bg-gray-100 border border-gray-300 rounded-xl p-1">
         <button
-          className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm transition ${viewMode==='list' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
-          onClick={()=> setTasksState({ viewMode: 'list' })}
+          className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm transition ${viewMode === 'list' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+          onClick={() => setTasksState({ viewMode: 'list' })}
           title="List view"
         >
           <ListIcon size={16} className="mr-1" /> List
         </button>
         <button
-          className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm transition ${viewMode==='board' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
-          onClick={()=> setTasksState({ viewMode: 'board' })}
+          className={`inline-flex items-center px-3 py-1.5 rounded-lg text-sm transition ${viewMode === 'board' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}
+          onClick={() => setTasksState({ viewMode: 'board' })}
           title="Board view"
         >
           <LayoutGrid size={16} className="mr-1" /> Board
         </button>
       </div>
 
+      <div style={{ height: '10px' }}></div>
       {!loading && (
         <>
           {viewMode === 'list' ? (
-            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="text-left px-4 py-2 text-gray-600">Title</th>
-                    <th className="text-left px-4 py-2 text-gray-600">Priority</th>
-                    <th className="text-left px-4 py-2 text-gray-600">Assignee</th>
-                    <th className="text-left px-4 py-2 text-gray-600">Due</th>
-                    <th className="text-left px-4 py-2 text-gray-600">Status</th>
-                    <th className="text-right px-4 py-2 text-gray-600">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((t) => (
-                    <tr key={t.id} className="border-b last:border-0">
-                      <td className="px-4 py-2">
-                        <div className="font-medium text-gray-900">{t.title}</div>
-                        {t.description && (
-                          <div className="text-xs text-gray-500 mt-0.5 line-clamp-2">{t.description}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2"><PriorityBadge p={t.priority} /></td>
-                      <td className="px-4 py-2">
-                        <span className="inline-flex items-center text-gray-700"><User size={14} className="mr-1" />{(t.assigneeId && memberNameById[t.assigneeId]) || t.assigneeId || '-'}</span>
-                      </td>
-                      <td className="px-4 py-2"><span className="inline-flex items-center text-gray-700"><Clock size={14} className="mr-1" />{fmt(t.dueAt) || '-'}</span></td>
-                      <td className="px-4 py-2">
-                        <Dropdown
-                          value={t.status}
-                          onChange={(v) => changeStatus(t, v as TaskStatus)}
-                          options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
-                          title={canEditTask(t) ? 'Change status' : 'No permission to change status'}
-                        />
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <button className="text-gray-700 hover:text-black mr-3" onClick={() => openDetails(t)} title="View details">
-                          <Eye size={16} />
-                        </button>
-                        <button className="text-gray-700 hover:text-black mr-3" onClick={() => openEdit(t)} title="Edit">
-                          <Pencil size={16} />
-                        </button>
-                        <button
-                          className="text-rose-600 hover:text-rose-700"
-                          onClick={() => removeTask(t)}
-                          disabled={!canEditTask(t)}
-                          title="Delete task"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filtered.length === 0 && (
+            deptId === 'ALL' ? (
+              <div className="space-y-6">
+                {accessibleDepts.map((d) => {
+                  const rows = (tasksByDept[d.id] || []).filter(matchesFilters);
+                  return (
+                    <div key={d.id}>
+                      <div className="text-xl md:text-2xl font-semibold text-gray-800 mb-2">{d.name}</div>
+                      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                        <table className="w-full text-sm table-auto">
+                          <colgroup>
+                            <col style={{ width: '30%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '16%' }} />
+                            <col style={{ width: '10%' }} />
+                            <col style={{ width: '8%' }} />
+                            <col style={{ width: '14%' }} />
+                            <col style={{ width: '12%' }} />
+                            <col style={{ width: '120px' }} />
+                          </colgroup>
+                          <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                              <th className="text-left px-4 py-2 text-gray-600">Title</th>
+                              <th className="text-left px-4 py-2 text-gray-600">Type</th>
+                              <th className="text-left px-4 py-2 text-gray-600">Venue</th>
+                              <th className="text-left px-4 py-2 text-gray-600">Priority</th>
+                              <th className="text-left px-4 py-2 text-gray-600">Assignee</th>
+                              <th className="text-left px-4 py-2 text-gray-600">Due</th>
+                              <th className="text-left px-4 py-2 text-gray-600">Status</th>
+                              <th className="text-right px-4 py-2 text-gray-600">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((t) => (
+                              <tr key={t.id} className="border-b last:border-0 align-top">
+                                <td className="px-4 py-2 align-top">
+                                  <div className="font-medium text-gray-900" title={t.title}>{t.title}</div>
+                                  {t.description && (
+                                    <div className="text-xs text-gray-600 mt-0.5 break-words whitespace-pre-wrap">
+                                      {t.description}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 align-top">
+                                  {t.type && (
+                                    <span className={`inline-flex items-center border rounded px-2 py-0.5 text-xs font-medium ${TYPE_COLOR[t.type as TaskType] || 'bg-gray-100 text-gray-800 border-gray-300'}`}>
+                                      {TYPE_OPTIONS.find(o => o.value === t.type)?.label || t.type}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 align-top">
+                                  <span className="text-sm text-gray-700">{venueNameById[t.venueId || ''] || (t.venueId ? t.venueId : '—')}</span>
+                                </td>
+                                <td className="px-4 py-2 align-top"><PriorityBadge p={t.priority} /></td>
+                                <td className="px-4 py-2 align-top">
+                                  {t.assigneeId ? (
+                                    <UserAvatar
+                                      nameOrEmail={memberNameById[t.assigneeId] || t.assigneeId}
+                                      size={28}
+                                      className="shadow-sm"
+                                    />
+                                  ) : (
+                                    <span className="text-gray-400 text-sm">—</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2 align-top"><span className="inline-flex items-center text-gray-700"><Calendar size={14} className="mr-1" />{fmt(t.dueAt) || '-'}</span></td>
+                                <td className="px-4 py-2 align-top">
+                                  {(() => {
+                                    const color =
+                                      t.status === 'done' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-100' :
+                                        t.status === 'in_progress' ? 'bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-100' :
+                                          t.status === 'blocked' ? 'bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-100' :
+                                            t.status === 'canceled' ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-100' :
+                                              'bg-gray-100 text-gray-800 border-gray-300 hover:bg-gray-100';
+                                    const base = 'appearance-none text-sm rounded-md pl-3 pr-8 py-2 border focus:outline-none focus:ring-2 w-[124px] min-w-[124px]';
+                                    return (
+                                      <Dropdown
+                                        value={t.status}
+                                        onChange={(v) => changeStatus(t, v as TaskStatus)}
+                                        options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+                                        title={canEditTask(t) ? 'Change status' : 'No permission to change status'}
+                                        disabled={!canEditTask(t)}
+                                        className={`${base} ${color}`}
+                                      />
+                                    );
+                                  })()}
+                                </td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap align-top">
+                                  <button className="text-gray-700 hover:text-black mr-3" onClick={() => openDetails(t)} title="View details">
+                                    <Eye size={16} />
+                                  </button>
+                                  <button className="text-gray-700 hover:text-black mr-3" onClick={() => openEdit(t)} title="Edit">
+                                    <Pencil size={16} />
+                                  </button>
+                                  <button
+                                    className="text-rose-600 hover:text-rose-700"
+                                    onClick={() => removeTask(t)}
+                                    disabled={!canEditTask(t)}
+                                    title="Delete task"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {rows.length === 0 && (
+                              <tr>
+                                <td colSpan={8} className="px-4 py-6 text-center text-gray-500">No tasks found.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+                <table className="w-full text-sm table-auto">
+                  <colgroup>
+                    <col style={{ width: '30%' }} />
+                    <col style={{ width: '12%' }} />
+                    <col style={{ width: '16%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '14%' }} />
+                    <col style={{ width: '12%' }} />
+                    <col style={{ width: '120px' }} />
+                  </colgroup>
+                  <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      <td colSpan={6} className="px-4 py-6 text-center text-gray-500">No tasks found.</td>
+                      <th className="text-left px-4 py-2 text-gray-600">Title</th>
+                      <th className="text-left px-4 py-2 text-gray-600">Type</th>
+                      <th className="text-left px-4 py-2 text-gray-600">Venue</th>
+                      <th className="text-left px-4 py-2 text-gray-600">Priority</th>
+                      <th className="text-left px-4 py-2 text-gray-600">Assignee</th>
+                      <th className="text-left px-4 py-2 text-gray-600">Due</th>
+                      <th className="text-left px-4 py-2 text-gray-600">Status</th>
+                      <th className="text-right px-4 py-2 text-gray-600">Actions</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filtered.map((t) => (
+                      <tr key={t.id} className="border-b last:border-0 align-top">
+                        <td className="px-4 py-2 align-top">
+                          <div className="font-medium text-gray-900" title={t.title}>{t.title}</div>
+                          {t.description && (
+                            <div className="text-xs text-gray-600 mt-0.5 break-words whitespace-pre-wrap">
+                              {t.description}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 align-top">
+                          {t.type && (
+                            <span className={`inline-flex items-center border rounded px-2 py-0.5 text-xs font-medium ${TYPE_COLOR[t.type as TaskType] || 'bg-gray-100 text-gray-800 border-gray-300'}`}>
+                              {TYPE_OPTIONS.find(o => o.value === t.type)?.label || t.type}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 align-top">
+                          <span className="text-sm text-gray-700">{venueNameById[t.venueId || ''] || (t.venueId ? t.venueId : '—')}</span>
+                        </td>
+                        <td className="px-4 py-2 align-top"><PriorityBadge p={t.priority} /></td>
+                        <td className="px-4 py-2 align-top">
+                          {t.assigneeId ? (
+                            <UserAvatar
+                              nameOrEmail={memberNameById[t.assigneeId] || t.assigneeId}
+                              size={28}
+                              className="shadow-sm"
+                            />
+                          ) : (
+                            <span className="text-gray-400 text-sm">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 align-top"><span className="inline-flex items-center text-gray-700"><Calendar size={14} className="mr-1" />{fmt(t.dueAt) || '-'}</span></td>
+                        <td className="px-4 py-2 align-top">
+                          {(() => {
+                            const color =
+                              t.status === 'done' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 hover:bg-emerald-100' :
+                                t.status === 'in_progress' ? 'bg-blue-100 text-blue-800 border-blue-300 hover:bg-blue-100' :
+                                  t.status === 'blocked' ? 'bg-rose-100 text-rose-800 border-rose-300 hover:bg-rose-100' :
+                                    t.status === 'canceled' ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-100' :
+                                      'bg-gray-100 text-gray-800 border-gray-300 hover:bg-gray-100';
+                            const base = 'appearance-none text-sm rounded-md pl-3 pr-8 py-2 border focus:outline-none focus:ring-2 w-[124px] min-w-[124px]';
+                            return (
+                              <Dropdown
+                                value={t.status}
+                                onChange={(v) => changeStatus(t, v as TaskStatus)}
+                                options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+                                title={canEditTask(t) ? 'Change status' : 'No permission to change status'}
+                                disabled={!canEditTask(t)}
+                                className={`${base} ${color}`}
+                              />
+                            );
+                          })()}
+                        </td>
+                        <td className="px-4 py-2 text-right whitespace-nowrap align-top">
+                          <button className="text-gray-700 hover:text-black mr-3" onClick={() => openDetails(t)} title="View details">
+                            <Eye size={16} />
+                          </button>
+                          <button className="text-gray-700 hover:text-black mr-3" onClick={() => openEdit(t)} title="Edit">
+                            <Pencil size={16} />
+                          </button>
+                          <button
+                            className="text-rose-600 hover:text-rose-700"
+                            onClick={() => removeTask(t)}
+                            disabled={!canEditTask(t)}
+                            title="Delete task"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-6 text-center text-gray-500">No tasks found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>)
           ) : (
             <TasksBoardView
               tasks={filtered}
@@ -454,160 +784,282 @@ export const TasksPage: React.FC = () => {
         </>
       )}
 
-      {/* Create modal */}
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white w-full max-w-lg rounded-lg shadow-lg border border-gray-200 p-6">
-            <div className="text-lg font-semibold mb-4">Create Task</div>
-            <div className="space-y-3">
+      {/* Create drawer */}
+      <SideDrawer
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        maxWidthClass="max-w-2xl"
+        header={<div className="text-xl font-semibold">Create Task</div>}
+      >
+        <div className="p-5">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm mb-1">Title</label>
+              <input
+                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                value={createForm.title}
+                onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Short task description"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Description</label>
+              <textarea
+                className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                rows={3}
+                value={createForm.description}
+                onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
+                placeholder="Details or context"
+              />
+            </div>
+            <div>
+              {currentEventId && (
+                <VenueSelect
+                  eventId={currentEventId}
+                  value={createForm.venueId}
+                  onChange={(v) => setCreateForm((f) => ({ ...f, venueId: v }))}
+                  label="Venue"
+                />
+              )}
+            </div>
+            <div className="grid md:grid-cols-4 gap-2">
               <div>
+                <label className="block text-sm mb-1">Priority</label>
+                <Dropdown
+                  value={String(createForm.priority)}
+                  onChange={(v) => setCreateForm((f) => ({ ...f, priority: Number(v) }))}
+                  options={[1, 2, 3, 4, 5].map((p) => ({ value: String(p), label: PRIORITY_LABEL[p] }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Type</label>
+                <Dropdown
+                  value={createForm.type}
+                  onChange={(v) => setCreateForm((f) => ({ ...f, type: v as TaskType }))}
+                  options={TYPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Start Date</label>
+                <input
+                  type="date"
+                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                  value={createForm.startAt}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, startAt: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Due Date</label>
+                <input
+                  type="date"
+                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                  value={createForm.dueAt}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, dueAt: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm mb-1">Assignee</label>
+              <Dropdown
+                value={createForm.assigneeId}
+                onChange={(v) => setCreateForm((f) => ({ ...f, assigneeId: v }))}
+                options={memberOptions}
+                fullWidth
+              />
+            </div>
+            {/* Attachments */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium">Attachments</label>
+                <label className="inline-flex items-center gap-2 text-sm text-blue-700 hover:text-blue-800 cursor-pointer">
+                  <Paperclip size={16} /> Attach files
+                  <input type="file" multiple className="hidden" onChange={(e) => onPickCreateFiles(e.target.files)} accept="image/*,video/*,application/pdf" />
+                </label>
+              </div>
+              {createFiles.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {createFiles.map((it, idx) => (
+                    <div key={idx} className="relative border rounded-md overflow-hidden bg-gray-50">
+                      <button type="button" className="absolute right-1 top-1 bg-white/80 rounded-full p-1 shadow" onClick={() => removeCreateFile(idx)} title="Remove">
+                        <X size={14} />
+                      </button>
+                      {it.file.type.startsWith('image/') ? (
+                        <img src={it.url} alt={it.file.name} className="w-full h-28 object-cover" />
+                      ) : (
+                        <div className="w-full h-28 flex items-center justify-center text-xs text-gray-600 p-2 text-center">
+                          {it.file.name}
+                        </div>
+                      )}
+                      {it.progress > 0 && it.progress < 100 && (
+                        <div className="absolute bottom-0 left-0 right-0 bg-blue-600 h-1" style={{ width: `${it.progress}%` }} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            {/* Dependencies */}
+            <div className="mt-2">
+              <div className="text-sm font-medium mb-2">Dependencies (Blockers)</div>
+              <div className="flex items-center gap-2">
+                <Dropdown
+                  value={''}
+                  onChange={(v) => setCreateDeps((prev) => [...prev, { upstreamId: v, depType: 'finish_to_start' }])}
+                  options={[{ value: '', label: 'Select task to add' }, ...tasks.map((t) => ({ value: t.id, label: t.title }))]}
+                  fullWidth
+                />
+              </div>
+              {createDeps.length > 0 && (
+                <div className="mt-2 space-y-2">
+                  {createDeps.map((d, idx) => (
+                    <div key={idx} className="flex items-center gap-2 text-sm">
+                      <span className="flex-1">{tasks.find((t) => t.id === d.upstreamId)?.title || d.upstreamId}</span>
+                      <Dropdown
+                        value={d.depType}
+                        onChange={(v) => setCreateDeps((prev) => prev.map((x, i) => (i === idx ? { ...x, depType: v as DepType } : x)))}
+                        options={[
+                          { value: 'finish_to_start', label: 'Finish to start' },
+                          { value: 'start_to_start', label: 'Start to start' },
+                          { value: 'finish_to_finish', label: 'Finish to finish' },
+                          { value: 'start_to_finish', label: 'Start to finish' },
+                        ]}
+                      />
+                      <button
+                        className="text-rose-600 hover:text-rose-700"
+                        onClick={() => setCreateDeps((prev) => prev.filter((_, i) => i !== idx))}
+                        title="Remove"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button className="px-3 py-2 rounded-md text-sm text-gray-700 hover:text-black" onClick={() => setShowCreate(false)}>
+              Cancel
+            </button>
+            <button
+              className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={createTask}
+              disabled={creating || !createForm.title.trim()}
+            >
+              Create
+            </button>
+          </div>
+        </div>
+      </SideDrawer>
+
+      {/* Edit drawer */}
+      {editing && (
+        <SideDrawer
+          open={!!editing}
+          onClose={() => setEditing(null)}
+          maxWidthClass="max-w-2xl"
+          header={
+            <>
+              <div className="text-xl font-semibold truncate">Edit Task</div>
+              <div className="text-sm text-gray-600 truncate">{editForm.title || editing.title}</div>
+            </>
+          }
+        >
+          <div className="p-5">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
                 <label className="block text-sm mb-1">Title</label>
                 <input
-                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  value={createForm.title}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, title: e.target.value }))}
-                  placeholder="Short task description"
-                  required
+                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                  value={editForm.title}
+                  onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
                 />
               </div>
-              <div>
+              <div className="md:col-span-2">
                 <label className="block text-sm mb-1">Description</label>
                 <textarea
-                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
-                  rows={3}
-                  value={createForm.description}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, description: e.target.value }))}
-                  placeholder="Details or context"
+                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                  rows={4}
+                  value={editForm.description}
+                  onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                 />
               </div>
-              <div className="grid md:grid-cols-3 gap-2">
+              <div className="md:col-span-2">
+                {currentEventId && (
+                  <VenueSelect
+                    eventId={currentEventId}
+                    value={editForm.venueId}
+                    onChange={(v) => setEditForm((f) => ({ ...f, venueId: v }))}
+                    label="Venue"
+                  />
+                )}
+              </div>
+              {/* Priority, Type, Start, Due in one row */}
+              <div className="md:col-span-2 grid md:grid-cols-4 gap-2">
                 <div>
                   <label className="block text-sm mb-1">Priority</label>
                   <Dropdown
-                    value={String(createForm.priority)}
-                    onChange={(v) => setCreateForm((f) => ({ ...f, priority: Number(v) }))}
+                    value={String(editForm.priority)}
+                    onChange={(v) => setEditForm((f) => ({ ...f, priority: Number(v) }))}
                     options={[1, 2, 3, 4, 5].map((p) => ({ value: String(p), label: PRIORITY_LABEL[p] }))}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm mb-1">Start At</label>
-                  <input
-                    type="datetime-local"
-                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
-                    value={createForm.startAt}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, startAt: e.target.value }))}
+                  <label className="block text-sm mb-1">Type</label>
+                  <Dropdown
+                    value={editForm.type}
+                    onChange={(v) => setEditForm((f) => ({ ...f, type: v as TaskType }))}
+                    options={TYPE_OPTIONS.map(o => ({ value: o.value, label: o.label }))}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm mb-1">Due At</label>
+                  <label className="block text-sm mb-1">Start Date</label>
                   <input
-                    type="datetime-local"
+                    type="date"
                     className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
-                    value={createForm.dueAt}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, dueAt: e.target.value }))}
+                    value={editForm.startAt}
+                    onChange={(e) => setEditForm((f) => ({ ...f, startAt: e.target.value }))}
                   />
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm mb-1">Assignee</label>
-                <Dropdown
-                  value={createForm.assigneeId}
-                  onChange={(v) => setCreateForm((f) => ({ ...f, assigneeId: v }))}
-                  options={memberOptions}
-                  fullWidth
-                />
-              </div>
-              {/* Dependencies */}
-              <div className="mt-2">
-                <div className="text-sm font-medium mb-2">Dependencies (Blockers)</div>
-                <div className="flex items-center gap-2">
-                  <Dropdown
-                    value={''}
-                    onChange={(v) => setCreateDeps((prev) => [...prev, { upstreamId: v, depType: 'finish_to_start' }])}
-                    options={[{ value: '', label: 'Select task to add' }, ...tasks.map((t) => ({ value: t.id, label: t.title }))]}
-                    fullWidth
+                <div>
+                  <label className="block text-sm mb-1">Due Date</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                    value={editForm.dueAt}
+                    onChange={(e) => setEditForm((f) => ({ ...f, dueAt: e.target.value }))}
                   />
                 </div>
-                {createDeps.length > 0 && (
-                  <div className="mt-2 space-y-2">
-                    {createDeps.map((d, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm">
-                        <span className="flex-1">{tasks.find((t) => t.id === d.upstreamId)?.title || d.upstreamId}</span>
-                        <Dropdown
-                          value={d.depType}
-                          onChange={(v) => setCreateDeps((prev) => prev.map((x, i) => (i === idx ? { ...x, depType: v as DepType } : x)))}
-                          options={[
-                            { value: 'finish_to_start', label: 'Finish to start' },
-                            { value: 'start_to_start', label: 'Start to start' },
-                            { value: 'finish_to_finish', label: 'Finish to finish' },
-                            { value: 'start_to_finish', label: 'Start to finish' },
-                          ]}
-                        />
-                        <button
-                          className="text-rose-600 hover:text-rose-700"
-                          onClick={() => setCreateDeps((prev) => prev.filter((_, i) => i !== idx))}
-                          title="Remove"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <button className="px-3 py-2 rounded-md text-sm text-gray-700 hover:text-black" onClick={() => setShowCreate(false)}>
-                Cancel
-              </button>
-              <button
-                className="px-3 py-2 rounded-md text-sm bg-blue-600 hover:bg-blue-700 text-white"
-                onClick={createTask}
-                disabled={creating || !createForm.title.trim()}
-              >
-                Create
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit modal */}
-      {editing && (
-        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-          <div className="bg-white w-full max-w-2xl rounded-lg shadow-lg border border-gray-200 p-6">
-            <div className="text-lg font-semibold mb-4">Edit Task</div>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-sm mb-1">Title</label>
-                <input className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={editForm.title} onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))} />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm mb-1">Description</label>
-                <textarea className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" rows={4} value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm mb-1">Priority</label>
-                <Dropdown value={String(editForm.priority)} onChange={(v) => setEditForm((f) => ({ ...f, priority: Number(v) }))} options={[1, 2, 3, 4, 5].map((p) => ({ value: String(p), label: PRIORITY_LABEL[p] }))} />
               </div>
               <div>
                 <label className="block text-sm mb-1">Status</label>
-                <Dropdown value={editForm.status} onChange={(v) => setEditForm((f) => ({ ...f, status: v as TaskStatus }))} options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))} />
-              </div>
-              <div>
-                <label className="block text-sm mb-1">Start At</label>
-                <input type="datetime-local" className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={editForm.startAt} onChange={(e) => setEditForm((f) => ({ ...f, startAt: e.target.value }))} />
-              </div>
-              <div>
-                <label className="block text-sm mb-1">Due At</label>
-                <input type="datetime-local" className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={editForm.dueAt} onChange={(e) => setEditForm((f) => ({ ...f, dueAt: e.target.value }))} />
+                <Dropdown
+                  value={editForm.status}
+                  onChange={(v) => setEditForm((f) => ({ ...f, status: v as TaskStatus }))}
+                  options={STATUS_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+                />
               </div>
               <div>
                 <label className="block text-sm mb-1">Progress %</label>
-                <input type="number" min={0} max={100} className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={editForm.progressPct} onChange={(e) => setEditForm((f) => ({ ...f, progressPct: Math.max(0, Math.min(100, Number(e.target.value))) }))} />
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                  value={editForm.progressPct}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, progressPct: Math.max(0, Math.min(100, Number(e.target.value))) }))
+                  }
+                />
               </div>
               <div>
-                <AssigneeSelect deptId={deptId} value={editForm.assigneeId} onChange={(v) => setEditForm((f) => ({ ...f, assigneeId: v }))} options={memberOptions.slice(1)} />
+                <AssigneeSelect
+                  deptId={deptId}
+                  value={editForm.assigneeId}
+                  onChange={(v) => setEditForm((f) => ({ ...f, assigneeId: v }))}
+                  options={memberOptions.slice(1)}
+                />
               </div>
             </div>
 
@@ -616,10 +1068,15 @@ export const TasksPage: React.FC = () => {
               <div className="text-sm font-medium mb-2">Dependencies (Blockers)</div>
               <div className="space-y-2">
                 {(deps?.blockers || []).map((b) => (
-                  <div key={b.upstreamId} className="flex items-center justify-between border border-gray-100 rounded px-3 py-2">
+                  <div
+                    key={b.upstreamId}
+                    className="flex items-center justify-between border border-gray-100 rounded px-3 py-2"
+                  >
                     <div className="text-sm">
                       <span className="font-medium">{b.task.title}</span>
-                      <span className="ml-2 text-xs text-gray-500">{PRIORITY_LABEL[b.task.priority]} • {b.task.status}</span>
+                      <span className="ml-2 text-xs text-gray-500">
+                        {PRIORITY_LABEL[b.task.priority]} • {b.task.status}
+                      </span>
                     </div>
                     <button
                       className="text-rose-600 hover:text-rose-700 text-sm"
@@ -670,7 +1127,10 @@ export const TasksPage: React.FC = () => {
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
-              <button className="px-3 py-2 rounded-md text-sm text-gray-700 hover:text-black" onClick={() => setEditing(null)}>
+              <button
+                className="px-3 py-2 rounded-md text-sm text-gray-700 hover:text-black"
+                onClick={() => setEditing(null)}
+              >
                 Cancel
               </button>
               <button
@@ -684,6 +1144,8 @@ export const TasksPage: React.FC = () => {
                     startAt: editForm.startAt,
                     dueAt: editForm.dueAt,
                     assigneeId: editForm.assigneeId,
+                    venueId: editForm.venueId,
+                    type: editForm.type,
                   });
                   // Save status/progress separately via status endpoint
                   try {
@@ -701,7 +1163,7 @@ export const TasksPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </SideDrawer>
       )}
       {viewing && (
         <TaskDetailsDrawer
@@ -712,7 +1174,7 @@ export const TasksPage: React.FC = () => {
           onChangeStatus={(s) => changeStatusFromDrawer(viewing, s)}
         />
       )}
-    </div>
+    </Page>
   );
 };
 

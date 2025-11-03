@@ -1,8 +1,8 @@
 // frontend/src/api.ts
 import { useAuthStore } from './store/authStore';
 
-// Prefer env, fall back to local backend port 3000 (matches backend/src/main.ts)
-const RAW_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'https://eef4de7fc8a3.ngrok-free.app';
+// Prefer env, fall back to local backend port 4000 (matches backend/src/main.ts)
+const RAW_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:4000';
 export const BASE_URL = String(RAW_BASE_URL).replace(/\/+$/, '');
 
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {

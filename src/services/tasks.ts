@@ -13,12 +13,17 @@ export const tasksService = {
   list: (() => {
     const TTL = 2 * 60 * 1000; // 2 minutes
     const cache = new Map<string, { ts: number; data: TaskItem[] }>();
-    return async (eventId: string, departmentId: string, opts?: { force?: boolean }) => {
-      const key = `${eventId}:${departmentId}`;
+    return async (
+      eventId: string,
+      departmentId: string,
+      opts?: { force?: boolean; assigneeId?: string }
+    ) => {
+      const key = `${eventId}:${departmentId}:${opts?.assigneeId ?? 'all'}`;
       const now = Date.now();
       const cached = cache.get(key);
       if (!opts?.force && cached && now - cached.ts < TTL) return cached.data;
-      const data = (await api.get<TaskItem[]>(`/events/${eventId}/departments/${departmentId}/tasks`)) || [];
+      const qs = opts?.assigneeId ? `?assigneeId=${encodeURIComponent(opts.assigneeId)}` : '';
+      const data = (await api.get<TaskItem[]>(`/events/${eventId}/departments/${departmentId}/tasks${qs}`)) || [];
       cache.set(key, { ts: now, data });
       return data;
     };

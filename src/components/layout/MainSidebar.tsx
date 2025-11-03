@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useContextStore } from '../../store/contextStore';
+import { useChatStore } from '../../store/chatStore';
 import { UserAvatar } from '../ui/UserAvatar';
 
 // 1. Define the props interface
@@ -25,10 +26,11 @@ interface NavItemProps {
   label: string;
   collapsed?: boolean;
   end?: boolean; // exact match for NavLink
+  badge?: number;
 }
 
 // 2. Apply the interface to your component
-const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end }) => (
+const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end, badge }) => (
   <NavLink
     to={to}
     end={end}
@@ -40,8 +42,28 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end
     }
     title={collapsed ? label : undefined}
   >
-    <Icon size={22} className={`${collapsed ? '' : 'mr-3'} flex-shrink-0`} />
-    {!collapsed && <span className="font-medium">{label}</span>}
+    {collapsed ? (
+      <span className="relative inline-flex items-center justify-center">
+        <Icon size={22} className={`flex-shrink-0`} />
+        {typeof badge === 'number' && badge > 0 && (
+          <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full min-w-[16px] text-center">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+      </span>
+    ) : (
+      <Icon size={22} className={`mr-3 flex-shrink-0`} />
+    )}
+    {!collapsed && (
+      <span className="font-medium flex-1 flex items-center">
+        {label}
+        {typeof badge === 'number' && badge > 0 && (
+          <span className="ml-auto bg-rose-600 text-white text-[11px] px-2 py-0.5 rounded-full min-w-[20px] text-center">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+      </span>
+    )}
   </NavLink>
 );
 
@@ -53,6 +75,7 @@ export const MainSidebar: React.FC = () => {
   const { myMemberships } = useContextStore();
   const isDeptHead = myMemberships.some((m) => m.role === 'DEPT_HEAD');
   const [collapsed, setCollapsed] = useState(false);
+  const totalUnread = Object.values(useChatStore((s)=> s.unread)).reduce((a,b)=>a+(b||0),0);
 
   useEffect(() => {
     if (currentUser && !currentUser.fullName) {
@@ -81,7 +104,7 @@ export const MainSidebar: React.FC = () => {
       <nav className="flex-1 overflow-y-auto">
         <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} />
         {isSuperAdmin && <NavItem to="/events" icon={Calendar} label="Events" collapsed={collapsed} />}
-        <NavItem to="/chat" icon={MessageSquare} label="Chat" collapsed={collapsed} />
+        <NavItem to="/chat" icon={MessageSquare} label="Chat" collapsed={collapsed} badge={totalUnread || undefined} />
         <NavItem to="/tasks" icon={CheckSquare} label="Tasks" collapsed={collapsed} />
         <NavItem to="/issues" icon={Bell} label="Issues" collapsed={collapsed} />
         <NavItem to="/gantt" icon={GanttChartSquare} label="Gantt" collapsed={collapsed} />

@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Smile, Paperclip, Mic, Send, Image as ImageIcon, File as FileIcon, X } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
+import { useAuthStore } from '../../store/authStore';
 
 interface ChatInputProps {
   roomId: string;
@@ -11,6 +12,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
   const send = useChatStore((s) => s.send);
   const sendAttachment = useChatStore((s) => s.sendAttachment);
   const sendAttachmentsBatch = useChatStore((s) => s.sendAttachmentsBatch);
+  // Return a stable empty object to avoid Zustand's useSyncExternalStore infinite loop
+  const EMPTY_PARTICIPANTS: Record<string, any> = Object.freeze({});
+  const participants = useChatStore((s) => s.participants[roomId] ?? EMPTY_PARTICIPANTS);
+  const me = useAuthStore((s) => s.currentUser);
+  const amParticipant = me?.id ? !!(participants as any)[me.id] : true;
   const imageRef = useRef<HTMLInputElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -24,11 +30,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
   return (
     <div className="flex items-center p-3 bg-gray-100 border-t border-gray-200">
       {/* Emoji & Attach Buttons */}
-      <button className="p-2 text-gray-500 hover:text-gray-700">
+      <button className="p-2 text-gray-500 hover:text-gray-700" disabled={!amParticipant} title={amParticipant ? '' : 'You are no longer a member of this group'}>
         <Smile size={24} />
       </button>
       <div className="relative">
-        <button className="p-2 text-gray-500 hover:text-gray-700" onClick={() => setShowPicker((v) => !v)}>
+        <button className="p-2 text-gray-500 hover:text-gray-700" onClick={() => setShowPicker((v) => !v)} disabled={!amParticipant} title={amParticipant ? '' : 'You are no longer a member of this group'}>
           <Paperclip size={24} />
         </button>
         {showPicker && (
@@ -76,13 +82,16 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && handleSend()}
         placeholder="Type a message"
-        className="flex-1 mx-2 px-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="flex-1 mx-2 px-4 py-2 rounded-full border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+        disabled={!amParticipant}
       />
 
       {/* Send or Mic Button */}
       <button
         onClick={handleSend}
-        className="p-2 rounded-full bg-blue-500 text-white hover:bg-blue-600"
+        className="p-2 rounded-full bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-60"
+        disabled={!amParticipant}
+        title={amParticipant ? 'Send' : 'You are no longer a member of this group'}
       >
         {text ? <Send size={24} /> : <Mic size={24} />}
       </button>
