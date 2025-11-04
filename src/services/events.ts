@@ -15,6 +15,7 @@ export interface EventMember {
 
 export const eventsService = {
   list: () => api.get<EventSummary[]>('/events'),
+  get: (eventId: string) => api.get<{ id: string; name: string; zonesEnabled?: boolean }>(`/events/${eventId}`),
   create: (dto: CreateEventDto) => api.post<EventSummary>('/events', dto),
   members: {
     list: (() => {

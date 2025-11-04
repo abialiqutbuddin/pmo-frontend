@@ -9,6 +9,8 @@ export interface TaskItem {
   creatorId: string;
   assigneeId?: string | null;
   venueId?: string | null;
+  zoneId?: string | null;
+  zonalDeptRowId?: string | null;
   type?: TaskType | null;
   title: string;
   description?: string | null;

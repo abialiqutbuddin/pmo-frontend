@@ -16,13 +16,17 @@ export const tasksService = {
     return async (
       eventId: string,
       departmentId: string,
-      opts?: { force?: boolean; assigneeId?: string }
+      opts?: { force?: boolean; assigneeId?: string; zoneId?: string; zonalDeptRowId?: string }
     ) => {
-      const key = `${eventId}:${departmentId}:${opts?.assigneeId ?? 'all'}`;
+      const key = `${eventId}:${departmentId}:${opts?.assigneeId ?? 'all'}:${opts?.zoneId ?? 'nozone'}:${opts?.zonalDeptRowId ?? 'nozdept'}`;
       const now = Date.now();
       const cached = cache.get(key);
       if (!opts?.force && cached && now - cached.ts < TTL) return cached.data;
-      const qs = opts?.assigneeId ? `?assigneeId=${encodeURIComponent(opts.assigneeId)}` : '';
+      const params = new URLSearchParams();
+      if (opts?.assigneeId) params.set('assigneeId', opts.assigneeId);
+      if (opts?.zoneId) params.set('zoneId', opts.zoneId);
+      if (opts?.zonalDeptRowId) params.set('zonalDeptRowId', opts.zonalDeptRowId);
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const data = (await api.get<TaskItem[]>(`/events/${eventId}/departments/${departmentId}/tasks${qs}`)) || [];
       cache.set(key, { ts: now, data });
       return data;

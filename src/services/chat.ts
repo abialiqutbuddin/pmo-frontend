@@ -5,7 +5,6 @@ export type Conversation = {
   kind: 'EVENT' | 'DEPARTMENT' | 'ISSUE' | 'GROUP' | 'DIRECT';
   title?: string | null;
   departmentId?: string | null;
-  issueId?: string | null;
   updatedAt: string;
   lastMessage?: { id: string; authorId: string; body?: string | null; createdAt: string; author?: { id: string; fullName?: string; email?: string } } | null;
   participants?: { userId: string; lastReadAt?: string | null; user?: { id: string; fullName?: string; email?: string } }[];
@@ -24,7 +23,6 @@ export const chatService = {
     kind: Conversation['kind'];
     title?: string;
     departmentId?: string;
-    issueId?: string;
     participantUserIds?: string[];
   }) => api.post<Conversation>(`/chat/conversations`, body),
 

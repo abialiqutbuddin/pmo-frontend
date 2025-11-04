@@ -10,16 +10,21 @@ import { useContextStore } from '../store/contextStore';
 import { EventDashboardPage } from '../pages/EventDashboardPage';
 import { MyDepartmentPage } from '../pages/MyDepartmentPage';
 import { TasksPage } from '../pages/TasksPage';
+import { CentralTasksPage } from '../pages/CentralTasksPage';
+import { ZonesTasksPage } from '../pages/ZonesTasksPage';
 import { AdminPanelPage } from '../pages/AdminPanelPage';
+import { ManageDepartmentsPage } from '../pages/ManageDepartmentsPage';
+import { ManageZonesPage } from '../pages/ManageZonesPage';
 import { EventSelectRedirectPage } from '../pages/EventSelectRedirectPage';
 import { AdminUsersPage } from '../pages/AdminUsersPage';
 import { GanttPage } from '../pages/GanttPage';
+import { FeedbackPage } from '../pages/FeedbackPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { UserProfilePage } from '../pages/UserProfilePage';
 
 // --- Placeholder pages ---
 const DashboardPage = () => <div className="p-8 text-3xl font-bold">Dashboard Page</div>;
-const IssuesPage = () => <div className="p-8 text-3xl font-bold">Issue Center Page</div>;
+// const IssuesPage = () => <div className="p-8 text-3xl font-bold">Issue Center Page</div>;
 // removed inline SettingsPage; real page imported
 
 const RequireAuth: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -77,22 +82,33 @@ export const AppRouter: React.FC = () => {
             </RequireAuth>
           }
         />
+        <Route path="tasks" element={<Navigate to="/tasks/central" replace />} />
         <Route
-          path="tasks"
+          path="tasks/central"
           element={
             <RequireAuth>
               <RequireEvent>
-                <TasksPage />
+                <CentralTasksPage />
               </RequireEvent>
             </RequireAuth>
           }
         />
         <Route
-          path="issues"
+          path="tasks/zones"
           element={
             <RequireAuth>
               <RequireEvent>
-                <IssuesPage />
+                <ZonesTasksPage />
+              </RequireEvent>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="feedback"
+          element={
+            <RequireAuth>
+              <RequireEvent>
+                <FeedbackPage />
               </RequireEvent>
             </RequireAuth>
           }
@@ -138,23 +154,30 @@ export const AppRouter: React.FC = () => {
 
         <Route
           path="admin"
+          element={<Navigate to="/admin/settings/departments" replace />}
+        />
+        <Route path="admin/departments" element={<Navigate to="/admin/settings/departments" replace />} />
+        <Route path="admin/departments/:departmentId" element={<Navigate to="/admin/settings/departments" replace />} />
+
+        <Route
+          path="admin/settings/departments"
           element={
             <RequireAuth>
               <RequireEvent>
                 <RequireAdmin>
-                  <AdminPanelPage />
+                  <ManageDepartmentsPage />
                 </RequireAdmin>
               </RequireEvent>
             </RequireAuth>
           }
         />
         <Route
-          path="admin/departments"
+          path="admin/settings/zones"
           element={
             <RequireAuth>
               <RequireEvent>
                 <RequireAdmin>
-                  <AdminPanelPage />
+                  <ManageZonesPage />
                 </RequireAdmin>
               </RequireEvent>
             </RequireAuth>

@@ -32,8 +32,8 @@ export const Breadcrumbs: React.FC = () => {
     items.push({ label: 'Chat' });
   } else if (pathname.startsWith('/tasks')) {
     items.push({ label: 'Tasks' });
-  } else if (pathname.startsWith('/issues')) {
-    items.push({ label: 'Issues' });
+  } else if (pathname.startsWith('/feedback')) {
+    items.push({ label: 'Feedback' });
   } else if (pathname.startsWith('/gantt')) {
     items.push({ label: 'Gantt' });
   } else if (pathname.startsWith('/settings')) {
@@ -63,4 +63,3 @@ export const Breadcrumbs: React.FC = () => {
     </nav>
   );
 };
-

@@ -5,9 +5,12 @@ import { useContextStore } from '../store/contextStore';
 import { useAuthStore } from '../store/authStore';
 import { usersService } from '../services/users';
 import { departmentsService, type Department, type DeptMember } from '../services/departments';
-import { Wrench, Plus, Building2, Users, Trash2, Pencil, Search, UserPlus, Shield } from 'lucide-react';
+import { Wrench, Plus, Building2, Users, Trash2, Pencil, Search, UserPlus, Shield, MapPin } from 'lucide-react';
 import { Dropdown } from '../components/ui/Dropdown';
 import { Spinner } from '../components/ui/Spinner';
+import { Page } from '../components/layout/Page';
+import { zonesService, type ZoneItem } from '../services/zones';
+import { eventsService } from '../services/events';
 
 // Types are imported from services
 type DeptOverview = { id: string; name: string; heads: string[]; memberCount: number };
@@ -41,6 +44,46 @@ export const AdminPanelPage: React.FC = () => {
   const [globalUsers, setGlobalUsers] = useState<{ id: string; fullName: string; email: string }[]>([]);
 
   const canManage = canAdminEvent; // OWNER/PMO_ADMIN or SuperAdmin
+
+  // Zones state
+  const [zonesEnabled, setZonesEnabled] = useState(false);
+  const [zones, setZones] = useState<ZoneItem[]>([]);
+  const [zonesLoading, setZonesLoading] = useState(false);
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
+  const [newZoneName, setNewZoneName] = useState('');
+  const [newZonalDeptName, setNewZonalDeptName] = useState('');
+  const [activeZoneId, setActiveZoneId] = useState('');
+  const [zoneDeptIds, setZoneDeptIds] = useState<Set<string>>(new Set());
+
+  // Load event zones state and zones list
+  useEffect(() => {
+    if (!currentEventId || !canManage) return;
+    (async () => {
+      try {
+        const e = await eventsService.get(currentEventId);
+        setZonesEnabled(!!e?.zonesEnabled);
+        if (e?.zonesEnabled) {
+          setZonesLoading(true);
+          const zs = await zonesService.list(currentEventId).catch(()=>[]);
+          setZones(zs || []);
+          if (!activeZoneId && (zs||[]).length) setActiveZoneId((zs||[])[0].id);
+        } else {
+          setZones([]);
+          setActiveZoneId('');
+        }
+      } finally {
+        setZonesLoading(false);
+      }
+    })();
+  }, [currentEventId, canManage]);
+
+  // Load selected zone's departments
+  useEffect(() => {
+    if (!currentEventId || !activeZoneId || !canManage) { setZoneDeptIds(new Set()); return; }
+    zonesService.zoneDepartments(currentEventId, activeZoneId)
+      .then((ids)=> setZoneDeptIds(new Set(ids||[])))
+      .catch(()=> setZoneDeptIds(new Set()));
+  }, [currentEventId, activeZoneId, canManage]);
 
   useEffect(() => {
     if (!currentEventId || !canManage) return;
@@ -181,12 +224,106 @@ export const AdminPanelPage: React.FC = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <Page className="space-y-6">
       <div className="flex items-center">
         <Wrench size={22} className="text-fuchsia-600 mr-2" />
-        <h1 className="text-2xl font-semibold">Manage Departments</h1>
+        <h1 className="text-2xl font-semibold">Event Settings</h1>
         <span className="ml-3 text-sm text-gray-500">{currentEventName}</span>
       </div>
+
+      {/* Zones settings */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center mb-3">
+          <MapPin size={18} className="text-fuchsia-600 mr-2" />
+          <div className="font-medium">Zones (optional)</div>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-sm text-gray-600">Enable Zones</span>
+            <input type="checkbox" checked={zonesEnabled} onChange={async (e)=>{
+              const enabled = e.target.checked;
+              setZonesEnabled(enabled);
+              try { await zonesService.toggle(currentEventId!, enabled); } catch {}
+              if (enabled) {
+                setZonesLoading(true);
+                const zs = await zonesService.list(currentEventId!).catch(()=>[]);
+                setZones(zs||[]);
+                setZonesLoading(false);
+              } else {
+                setZones([]);
+                setActiveZoneId('');
+              }
+            }} />
+          </div>
+        </div>
+        {zonesEnabled && (
+          <>
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm flex-1"
+                placeholder="New zone name"
+                value={newZoneName}
+                onChange={(e)=> setNewZoneName(e.target.value)}
+              />
+              <button
+                className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm"
+                onClick={async ()=>{
+                  const name = newZoneName.trim();
+                  if (!name) return;
+                  try {
+                    setZonesLoading(true);
+                    const z = await zonesService.create(currentEventId!, { name });
+                    setZones((prev)=> [...prev, z]);
+                    setNewZoneName('');
+                    if (!activeZoneId) setActiveZoneId(z.id);
+                  } catch (e:any) { setZoneErr(e?.message || 'Failed to create zone'); } finally { setZonesLoading(false); }
+                }}
+              >
+                <Plus size={16} className="mr-1"/> Add Zone
+              </button>
+            </div>
+            {zoneErr && <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded p-2 mb-2">{zoneErr}</div>}
+            {zonesLoading && <div className="mb-2"><Spinner size="sm" label="Loading zones" /></div>}
+            <div className="mb-4 flex items-center gap-2 flex-wrap">
+              {zones.map((z)=> (
+                <button key={z.id} className={`px-3 py-1.5 text-sm rounded border ${activeZoneId===z.id ? 'bg-blue-50 border-blue-300 text-blue-700' : 'border-gray-200 text-gray-700'}`} onClick={()=> setActiveZoneId(z.id)}>
+                  {z.name}
+                </button>
+              ))}
+              {zones.length===0 && <div className="text-sm text-gray-500">No zones yet. Create one above.</div>}
+            </div>
+            {/* per-zone department mapping removed per request */}
+          </>
+        )}
+      </div>
+
+      {/* Departments + Members (simplified layout) */}
+      {/* Zonal departments templates */}
+      {zonesEnabled && (
+        <div className="bg-white border border-gray-200 rounded-lg p-4">
+          <div className="font-medium mb-2">Zonal Departments (applies to all zones)</div>
+          <div className="flex items-center gap-2 mb-2">
+            <input
+              className="flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+              placeholder="New zonal department name"
+              value={newZonalDeptName}
+              onChange={(e)=> setNewZonalDeptName(e.target.value)}
+            />
+            <button
+              className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm"
+              onClick={async ()=>{
+                const name = newZonalDeptName.trim();
+                if (!name) return;
+                try {
+                  await zonesService.createZonalDept(currentEventId!, name);
+                  setNewZonalDeptName('');
+                } catch {}
+              }}
+            >
+              <Plus size={16} className="mr-1"/> Add
+            </button>
+          </div>
+          <div className="text-xs text-gray-500">Each zonal department is automatically assigned to all zones.</div>
+        </div>
+      )}
 
       {/* Departments + Members (simplified layout) */}
       <div className="grid md:grid-cols-3 gap-4">
@@ -373,6 +510,6 @@ export const AdminPanelPage: React.FC = () => {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   );
 };

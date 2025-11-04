@@ -1,7 +1,7 @@
 // src/components/tasks/AttachmentsPanel.tsx
 import React, { useEffect, useState } from 'react';
 import { BASE_URL } from '../../api';
-import { attachmentsService } from '../../services/attachments';
+import { attachmentsService, type AttachmentEntityType } from '../../services/attachments';
 import { X, Download, FileText } from 'lucide-react';
 
 type Attachment = {
@@ -16,7 +16,7 @@ type Attachment = {
 
 export const AttachmentsPanel: React.FC<{
     eventId: string;
-    entityType: 'Task' | 'Issue' | 'Message';
+    entityType: AttachmentEntityType;
     entityId: string;
 }> = ({ eventId, entityType, entityId }) => {
     const [items, setItems] = useState<Attachment[]>([]);

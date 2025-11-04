@@ -2,7 +2,7 @@
 import { api, BASE_URL } from '../api';
 import { useAuthStore } from '../store/authStore';
 
-export type AttachmentEntityType = 'Task' | 'Issue' | 'Message';
+export type AttachmentEntityType = 'Task' | 'Feedback' | 'Message';
 
 export interface Attachment {
   id: string;

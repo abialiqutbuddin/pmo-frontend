@@ -1,5 +1,5 @@
 import React, { ElementType, useEffect, useState } from 'react'; // Import ElementType
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   MessageSquare,
@@ -10,6 +10,9 @@ import {
   Calendar,
   LogOut,
   Building2,
+  Wrench,
+  MapPin,
+  ChevronDown,
   Users2,
   ChevronsLeft,
   ChevronsRight,
@@ -27,18 +30,17 @@ interface NavItemProps {
   collapsed?: boolean;
   end?: boolean; // exact match for NavLink
   badge?: number;
+  child?: boolean; // render smaller, indented
 }
 
 // 2. Apply the interface to your component
-const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end, badge }) => (
+const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end, badge, child }) => (
   <NavLink
     to={to}
     end={end}
     // 3. Add type for the 'isActive' parameter
     className={({ isActive }: { isActive: boolean }) =>
-      `block w-full flex items-center ${collapsed ? 'justify-center' : ''} p-3 my-1 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white ${
-        isActive ? 'bg-blue-600 text-white' : ''
-      }`
+      `block w-full flex items-center ${collapsed ? 'justify-center' : ''} ${child ? 'pl-10 pr-3 py-2 my-0.5 text-sm' : 'p-3 my-1'} rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white ${isActive ? 'bg-blue-600 text-white' : ''}`
     }
     title={collapsed ? label : undefined}
   >
@@ -52,7 +54,7 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end
         )}
       </span>
     ) : (
-      <Icon size={22} className={`mr-3 flex-shrink-0`} />
+      <Icon size={child ? 18 : 22} className={`${child ? 'mr-2' : 'mr-3'} flex-shrink-0`} />
     )}
     {!collapsed && (
       <span className="font-medium flex-1 flex items-center">
@@ -69,12 +71,15 @@ const NavItem: React.FC<NavItemProps> = ({ to, icon: Icon, label, collapsed, end
 
 export const MainSidebar: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const isSuperAdmin = !!useAuthStore((s) => s.currentUser?.isSuperAdmin);
   const currentUser = useAuthStore((s) => s.currentUser);
   const hydrateProfile = useAuthStore((s) => s._hydrateProfile);
-  const { myMemberships } = useContextStore();
+  const { myMemberships, canAdminEvent } = useContextStore();
   const isDeptHead = myMemberships.some((m) => m.role === 'DEPT_HEAD');
   const [collapsed, setCollapsed] = useState(false);
+  const [eventOpen, setEventOpen] = useState(false);
+  const [tasksOpen, setTasksOpen] = useState(false);
   const totalUnread = Object.values(useChatStore((s)=> s.unread)).reduce((a,b)=>a+(b||0),0);
 
   useEffect(() => {
@@ -82,6 +87,12 @@ export const MainSidebar: React.FC = () => {
       void hydrateProfile();
     }
   }, [currentUser?.id]);
+
+  // auto-open Event Settings group when on its routes
+  useEffect(() => {
+    if (location.pathname.startsWith('/admin/settings')) setEventOpen(true);
+    if (location.pathname.startsWith('/tasks')) setTasksOpen(true);
+  }, [location.pathname]);
 
   return (
     <div className={`${collapsed ? 'w-16' : 'w-64'} relative h-screen bg-gray-800 text-white flex flex-col p-3 transition-all duration-200`}>
@@ -105,15 +116,64 @@ export const MainSidebar: React.FC = () => {
         <NavItem to="/dashboard" icon={LayoutDashboard} label="Dashboard" collapsed={collapsed} />
         {isSuperAdmin && <NavItem to="/events" icon={Calendar} label="Events" collapsed={collapsed} />}
         <NavItem to="/chat" icon={MessageSquare} label="Chat" collapsed={collapsed} badge={totalUnread || undefined} />
-        <NavItem to="/tasks" icon={CheckSquare} label="Tasks" collapsed={collapsed} />
-        <NavItem to="/issues" icon={Bell} label="Issues" collapsed={collapsed} />
+        {/* Tasks group (collapsible) */}
+        <div className="my-1">
+          <button
+            className={`block w-full flex items-center ${collapsed ? 'justify-center' : ''} p-3 my-1 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white`}
+            onClick={() => setTasksOpen((o) => !o)}
+            title={collapsed ? 'Tasks' : undefined}
+          >
+            {collapsed ? (
+              <CheckSquare size={22} className="flex-shrink-0" />
+            ) : (
+              <>
+                <span className="flex items-center gap-3">
+                  <CheckSquare size={22} className="flex-shrink-0" />
+                  <span className="font-medium">Tasks</span>
+                </span>
+                <ChevronDown size={18} className={`ml-auto transition-transform ${tasksOpen ? '' : '-rotate-90'}`} />
+              </>
+            )}
+          </button>
+          {!collapsed && tasksOpen && (
+            <div className="mt-1">
+              <NavItem to="/tasks/central" icon={Building2} label="Central Departments" collapsed={collapsed} child />
+              <NavItem to="/tasks/zones" icon={MapPin} label="Zones" collapsed={collapsed} child />
+            </div>
+          )}
+        </div>
+        <NavItem to="/feedback" icon={Bell} label="Feedback" collapsed={collapsed} />
         <NavItem to="/gantt" icon={GanttChartSquare} label="Gantt" collapsed={collapsed} />
         {!isSuperAdmin && isDeptHead && (
           <NavItem to="/me/department" icon={Building2} label="Department" collapsed={collapsed} />
         )}
 
-        {isSuperAdmin && (
-          <NavItem to="/admin/departments" icon={Building2} label="Departments" collapsed={collapsed} />
+        {(isSuperAdmin || canAdminEvent) && (
+          <div className="my-1">
+            <button
+              className={`block w-full flex items-center ${collapsed ? 'justify-center' : ''} p-3 my-1 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white`}
+              onClick={() => setEventOpen((o) => !o)}
+              title={collapsed ? 'Event Settings' : undefined}
+            >
+              {collapsed ? (
+                <Wrench size={22} className="flex-shrink-0" />
+              ) : (
+                <>
+                  <span className="flex items-center gap-3">
+                    <Wrench size={22} className="flex-shrink-0" />
+                    <span className="font-medium">Event Settings</span>
+                  </span>
+                  <ChevronDown size={18} className={`ml-auto transition-transform ${eventOpen ? '' : '-rotate-90'}`} />
+                </>
+              )}
+            </button>
+            {!collapsed && eventOpen && (
+              <div className="mt-1">
+                <NavItem to="/admin/settings/departments" icon={Building2} label="Manage Departments" collapsed={collapsed} child />
+                <NavItem to="/admin/settings/zones" icon={MapPin} label="Manage Zones" collapsed={collapsed} child />
+              </div>
+            )}
+          </div>
         )}
 
         {/* Super Admin: Users management */}
