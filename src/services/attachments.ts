@@ -24,6 +24,7 @@ export const attachmentsService = {
     fd.append('entityId', entityId);
     return api.post<void>(`/events/${eventId}/attachments/upload`, fd);
   },
+  remove: (eventId: string, id: string) => api.delete<void>(`/events/${eventId}/attachments/${encodeURIComponent(id)}`),
   uploadWithProgress: (eventId: string, entityType: AttachmentEntityType, entityId: string, file: File, onProgress?: (pct: number) => void) => {
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();

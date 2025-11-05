@@ -32,6 +32,8 @@ export const ManageDepartmentsPage: React.FC = () => {
   const [assignRole, setAssignRole] = useState<'DEPT_HEAD' | 'DEPT_MEMBER' | 'OBSERVER'>('DEPT_MEMBER');
   const [assignLoading, setAssignLoading] = useState(false);
   const [globalUsers, setGlobalUsers] = useState<{ id: string; fullName: string; email: string }[]>([]);
+  const [assignUserId, setAssignUserId] = useState<string>('');
+  const [assignOpen, setAssignOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (!currentEventId || !canAdminEvent) return;
@@ -141,6 +143,9 @@ export const ManageDepartmentsPage: React.FC = () => {
     try {
       const row = await departmentsService.members.add(currentEventId, activeDeptId, { userId, role: assignRole });
       setMembers((prev) => [row, ...prev]);
+      // Remove from candidate list and clear selection
+      setAssignable((prev) => prev.filter((u) => u.userId !== userId));
+      setAssignUserId('');
     } finally {
       setAssignLoading(false);
     }
@@ -208,11 +213,44 @@ export const ManageDepartmentsPage: React.FC = () => {
               <div className="mb-3 flex items-center gap-2">
                 <div className="relative flex-1">
                   <Search size={14} className="absolute left-2 top-2.5 text-gray-400" />
-                  <input className="w-full pl-7 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" placeholder="Search users to add" value={query} onChange={(e)=> setQuery(e.target.value)} />
+                  <input
+                    className="w-full pl-7 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
+                    placeholder="Search users to add"
+                    value={query}
+                    onChange={(e)=> { setQuery(e.target.value); setAssignUserId(''); setAssignOpen(true); }}
+                    onFocus={() => setAssignOpen(true)}
+                    onBlur={() => setTimeout(()=> setAssignOpen(false), 150)}
+                  />
+                  {assignOpen && assignable.length > 0 && (
+                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-sm max-h-56 overflow-auto">
+                      {assignable.map(u => (
+                        <button
+                          key={u.userId}
+                          type="button"
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${assignUserId===u.userId ? 'bg-blue-50' : ''}`}
+                          onClick={() => { setAssignUserId(u.userId); setQuery(u.fullName || u.email || u.userId); setAssignOpen(false); }}
+                        >
+                          <div className="font-medium text-gray-900">{u.fullName || u.email || u.userId}</div>
+                          <div className="text-xs text-gray-500">{u.userId}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <Dropdown value={assignRole} onChange={(v)=> setAssignRole(v as any)} options={[{ value: 'DEPT_MEMBER', label: 'Member' }, { value: 'DEPT_HEAD', label: 'Head' }, { value: 'OBSERVER', label: 'Observer' }]} />
-                <button className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-2 text-sm" disabled={!assignable.length || assignLoading} onClick={()=> assignable.length && addMember(assignable[0].userId)}><UserPlus size={16} className="mr-1"/>Add</button>
+                <button
+                  className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-2 text-sm"
+                  disabled={!assignable.length || assignLoading}
+                  onClick={()=> {
+                    const target = assignUserId || (assignable[0]?.userId || '');
+                    if (!target) return;
+                    addMember(target);
+                  }}
+                >
+                  <UserPlus size={16} className="mr-1"/>Add
+                </button>
               </div>
+              {/* Searchable dropdown replaces list of candidates */}
               <div className="border rounded divide-y">
                 {membersLoading && <div className="p-3"><Spinner size="sm" label="Loading members"/></div>}
                 {membersErr && <div className="p-3 text-rose-600 text-sm">{membersErr}</div>}
@@ -237,4 +275,3 @@ export const ManageDepartmentsPage: React.FC = () => {
     </Page>
   );
 };
-

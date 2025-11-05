@@ -9,13 +9,14 @@ import { departmentsService } from '../services/departments';
 import { eventsService } from '../services/events';
 import type { TaskItem, TaskStatus, TaskType } from '../types/task';
 import { Spinner } from '../components/ui/Spinner';
-import { LayoutGrid, List as ListIcon, Calendar, Eye, Pencil, Trash2, Flag, Plus } from 'lucide-react';
+import { LayoutGrid, List as ListIcon, Calendar, Eye, Pencil, Trash2, Flag, Plus, FileText, Download } from 'lucide-react';
 import { UserAvatar } from '../components/ui/UserAvatar';
 import { TaskDetailsDrawer } from '../components/tasks/TaskDetailsDrawer';
 import { SideDrawer } from '../components/ui/SideDrawer';
 import { TasksBoardView } from '../components/tasks/TaskBoardView';
 import { VenueSelect } from '../components/tasks/VenueSelect';
 import { attachmentsService } from '../services/attachments';
+import { BASE_URL } from '../api';
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: 'todo', label: 'To Do' },
@@ -105,6 +106,7 @@ export const CentralTasksPage: React.FC = () => {
   const [tasksByDept, setTasksByDept] = useState<Record<string, TaskItem[]>>({});
   const [memberOptions, setMemberOptions] = useState<{ value: string; label: string }[]>([]);
   const [memberNameById, setMemberNameById] = useState<Record<string, string>>({});
+  const [deptMemberOpts, setDeptMemberOpts] = useState<Record<string, { value: string; label: string }[]>>({});
   const [venueNameById, setVenueNameById] = useState<Record<string, string>>({});
 
   // ✅ Create/edit modal state MUST live inside the component
@@ -123,6 +125,9 @@ export const CentralTasksPage: React.FC = () => {
   const [createDeps, setCreateDeps] = useState<{ upstreamId: string; depType: DepType }[]>([]);
   const [createFiles, setCreateFiles] = useState<{ file: File; url: string; progress: number }[]>([]);
   const [createDeptId, setCreateDeptId] = useState<string>('');
+  const [editFiles, setEditFiles] = useState<{ file: File; url: string; progress: number }[]>([]);
+  const [existingAtt, setExistingAtt] = useState<{ id: string; originalName: string; mimeType: string; size?: number; bytes?: number; objectKey?: string }[]>([]);
+  const [existingLoading, setExistingLoading] = useState(false);
 
   const statusFilter = tasksState.statusFilter;
   const priorityFilter = tasksState.priorityFilter;
@@ -255,6 +260,34 @@ export const CentralTasksPage: React.FC = () => {
     })();
   }, [currentEventId, deptId]);
 
+  // Helper: ensure department-specific member options are loaded (for assignee dropdowns)
+  async function ensureDeptMemberOptions(loadDeptId?: string) {
+    if (!currentEventId) return;
+    const id = loadDeptId;
+    if (!id) return;
+    if (deptMemberOpts[id]) return;
+    try {
+      const rows = await departmentsService.members.list(currentEventId, id).catch(() => []);
+      const opts = (rows || [])
+        .map((m: any) => ({ value: m.userId, label: m.user?.fullName || m.userId }))
+        .sort((a: any, b: any) => a.label.localeCompare(b.label));
+      setDeptMemberOpts((prev) => ({ ...prev, [id]: opts }));
+    } catch {}
+  }
+
+  // When create modal is open, load member options for target department
+  useEffect(() => {
+    if (!showCreate) return;
+    const targetDeptId = deptId === 'ALL' ? createDeptId : deptId;
+    if (targetDeptId) void ensureDeptMemberOptions(targetDeptId);
+  }, [showCreate, deptId, createDeptId]);
+
+  // When editing, load member options for the task's department
+  useEffect(() => {
+    if (!editing?.departmentId) return;
+    void ensureDeptMemberOptions(editing.departmentId);
+  }, [editing?.departmentId]);
+
   // Load tasks when deps change
   useEffect(() => {
     if (!currentEventId) return;
@@ -361,6 +394,47 @@ export const CentralTasksPage: React.FC = () => {
       return copy;
     });
   }
+
+  function onPickEditFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const next = Array.from(files).map((f) => ({ file: f, url: URL.createObjectURL(f), progress: 0 }));
+    setEditFiles((prev) => [...prev, ...next]);
+  }
+  function removeEditFile(idx: number) {
+    setEditFiles((prev) => {
+      const copy = [...prev];
+      const [rm] = copy.splice(idx, 1);
+      if (rm) URL.revokeObjectURL(rm.url);
+      return copy;
+    });
+  }
+
+  // Helpers for existing attachments
+  function publicUrlFromObjectKey(objectKey?: string) {
+    if (!objectKey) return '';
+    // encode each segment to avoid problems with spaces
+    return `${BASE_URL}/${objectKey.split('/').map(encodeURIComponent).join('/')}`;
+  }
+  function fileUrl(eventId: string, a: { id: string; objectKey?: string }) {
+    if (a.objectKey) return publicUrlFromObjectKey(a.objectKey);
+    return `${BASE_URL}/events/${eventId}/attachments/${a.id}`;
+  }
+
+  useEffect(() => {
+    let mounted = true;
+    async function loadExisting() {
+      if (!currentEventId || !editing?.id) { setExistingAtt([]); return; }
+      setExistingLoading(true);
+      try {
+        const rows = await attachmentsService.list(currentEventId, 'Task', editing.id).catch(() => []);
+        if (mounted) setExistingAtt(rows || []);
+      } finally {
+        if (mounted) setExistingLoading(false);
+      }
+    }
+    loadExisting();
+    return () => { mounted = false; };
+  }, [currentEventId, editing?.id]);
 
 
 
@@ -490,6 +564,32 @@ export const CentralTasksPage: React.FC = () => {
 
       // 🔹 Hard refresh with cache-bust so board/list stays true to server
       await loadTasks(true);
+
+      // Upload any newly attached files (edit)
+      if (editFiles.length) {
+        for (let i = 0; i < editFiles.length; i++) {
+          const item = editFiles[i];
+          try {
+            await attachmentsService.uploadWithProgress(
+              currentEventId,
+              'Task',
+              editing.id,
+              item.file,
+              (pct) => setEditFiles((prev) => prev.map((p, idx) => (idx === i ? { ...p, progress: pct } : p)))
+            );
+          } catch { }
+        }
+        setEditFiles((prev) => {
+          prev.forEach((p) => URL.revokeObjectURL(p.url));
+          return [];
+        });
+      }
+
+      // Refresh existing attachments list
+      try {
+        const rows = await attachmentsService.list(currentEventId, 'Task', editing.id).catch(() => []);
+        setExistingAtt(rows || []);
+      } catch {}
 
       setEditing(null);
     } catch {
@@ -882,40 +982,54 @@ export const CentralTasksPage: React.FC = () => {
                 <Dropdown
                   value={createForm.assigneeId || ''}
                   onChange={(v) => setCreateForm(f => ({ ...f, assigneeId: v }))}
-                  options={[{ value: '', label: 'Unassigned' }, ...memberOptions.slice(1)]}
+                  options={(() => {
+                    const targetDeptId = deptId === 'ALL' ? createDeptId : deptId;
+                    const opts = targetDeptId ? (deptMemberOpts[targetDeptId] || []) : [];
+                    return [{ value: '', label: 'Unassigned' }, ...opts];
+                  })()}
                 />
               </div>
 
               {/* Attachments */}
               <div className="md:col-span-2">
                 <label className="block text-sm mb-1">Attachments</label>
-                <input
-                  type="file"
-                  multiple
-                  onChange={(e) => onPickCreateFiles(e.target.files)}
-                  className="block w-full text-sm text-gray-700"
-                />
-                {createFiles.length > 0 && (
-                  <ul className="mt-2 space-y-2">
-                    {createFiles.map((f, idx) => (
-                      <li key={idx} className="flex items-center justify-between text-sm">
-                        <span className="truncate max-w-[70%]">{f.file.name}</span>
-                        <div className="flex items-center gap-2">
-                          {f.progress > 0 && f.progress < 100 && (
-                            <span className="text-xs text-gray-500">{Math.round(f.progress)}%</span>
-                          )}
-                          <button
-                            type="button"
-                            className="text-rose-600 hover:text-rose-700"
-                            onClick={() => removeCreateFile(idx)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="border border-dashed border-gray-300 rounded-md p-3 bg-gray-50">
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(e) => onPickCreateFiles(e.target.files)}
+                    className="block w-full text-sm text-gray-700"
+                  />
+                  <div className="text-xs text-gray-500 mt-1">Add images or files. Images show a preview.</div>
+                  {createFiles.length > 0 && (
+                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {createFiles.map((f, idx) => {
+                        const isImg = f.file.type.startsWith('image/');
+                        return (
+                          <div key={idx} className="border rounded bg-white overflow-hidden shadow-sm">
+                            <div className="relative w-full h-28 bg-gray-100 flex items-center justify-center">
+                              {isImg ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={f.url} alt={f.file.name} className="object-cover w-full h-full" />
+                              ) : (
+                                <div className="text-xs text-gray-500 px-2 text-center break-words">
+                                  {f.file.name}
+                                </div>
+                              )}
+                              {f.progress > 0 && f.progress < 100 && (
+                                <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[11px] px-1 py-0.5 text-center">
+                                  {Math.round(f.progress)}%
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-2 py-1 text-[11px] text-gray-600 truncate" title={f.file.name}>{f.file.name}</div>
+                            <button type="button" className="w-full text-xs text-rose-600 hover:text-rose-700 py-1 border-t" onClick={() => removeCreateFile(idx)}>Remove</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1032,8 +1146,101 @@ export const CentralTasksPage: React.FC = () => {
                 <Dropdown
                   value={editForm.assigneeId || ''}
                   onChange={(v) => setEditForm((f) => ({ ...f, assigneeId: v }))}
-                  options={[{ value: '', label: 'Unassigned' }, ...memberOptions.slice(1)]}
+                  options={(() => {
+                    const id = editing?.departmentId || '';
+                    const opts = id ? (deptMemberOpts[id] || []) : [];
+                    return [{ value: '', label: 'Unassigned' }, ...opts];
+                  })()}
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm mb-1">Add Attachments</label>
+                <div className="border border-dashed border-gray-300 rounded-md p-3 bg-gray-50">
+                  <input type="file" multiple onChange={(e) => onPickEditFiles(e.target.files)} className="block w-full text-sm text-gray-700" />
+                  <div className="text-xs text-gray-500 mt-1">Upload images or files. Images show a preview.</div>
+                  {editFiles.length > 0 && (
+                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                      {editFiles.map((f, idx) => {
+                        const isImg = f.file.type.startsWith('image/');
+                        return (
+                          <div key={idx} className="border rounded bg-white overflow-hidden shadow-sm">
+                            <div className="relative w-full h-28 bg-gray-100 flex items-center justify-center">
+                              {isImg ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={f.url} alt={f.file.name} className="object-cover w-full h-full" />
+                              ) : (
+                                <div className="text-xs text-gray-500 px-2 text-center break-words">
+                                  {f.file.name}
+                                </div>
+                              )}
+                              {f.progress > 0 && f.progress < 100 && (
+                                <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[11px] px-1 py-0.5 text-center">
+                                  {Math.round(f.progress)}%
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-2 py-1 text-[11px] text-gray-600 truncate" title={f.file.name}>{f.file.name}</div>
+                            <button type="button" className="w-full text-xs text-rose-600 hover:text-rose-700 py-1 border-t" onClick={() => removeEditFile(idx)}>Remove</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm mb-1">Existing Attachments</label>
+                {existingLoading ? (
+                  <div className="text-xs text-gray-500">Loading attachments…</div>
+                ) : existingAtt.length === 0 ? (
+                  <div className="text-xs text-gray-500">No attachments yet.</div>
+                ) : (
+                  <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {existingAtt.map((a) => {
+                      const isImg = (a.mimeType || '').startsWith('image/');
+                      const href = currentEventId ? fileUrl(currentEventId, a) : '#';
+                      return (
+                        <div key={a.id} className="group border rounded bg-white overflow-hidden shadow-sm">
+                          <div className="relative w-full h-28 bg-gray-100 flex items-center justify-center">
+                            {isImg ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <a href={href} target="_blank" rel="noopener noreferrer"><img src={href} alt={a.originalName} className="object-cover w-full h-full" /></a>
+                            ) : (
+                              <a href={href} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center justify-center text-gray-500 w-full h-full">
+                                <FileText size={24} />
+                                <span className="text-[11px] mt-1">File</span>
+                              </a>
+                            )}
+                            <div className="absolute bottom-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                              <a href={href} target="_blank" rel="noopener noreferrer" className="inline-flex items-center bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
+                                <Download size={12} className="mr-1" /> Open
+                              </a>
+                              <button
+                                type="button"
+                                className="inline-flex items-center bg-rose-600/80 hover:bg-rose-700 text-white text-[10px] px-1.5 py-0.5 rounded"
+                                title="Delete attachment"
+                                onClick={async (e) => {
+                                  e.preventDefault();
+                                  if (!currentEventId) return;
+                                  if (!confirm('Delete this attachment?')) return;
+                                  try {
+                                    await attachmentsService.remove(currentEventId, a.id);
+                                    setExistingAtt(prev => prev.filter(x => x.id !== a.id));
+                                  } catch {
+                                    alert('Failed to delete attachment');
+                                  }
+                                }}
+                              >
+                                <Trash2 size={12} className="mr-1" /> Delete
+                              </button>
+                            </div>
+                          </div>
+                          <div className="px-2 py-1 text-[11px] text-gray-700 truncate" title={a.originalName}>{a.originalName}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 

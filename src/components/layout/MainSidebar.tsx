@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { useContextStore } from '../../store/contextStore';
+import { zonesService } from '../../services/zones';
 import { useChatStore } from '../../store/chatStore';
 import { UserAvatar } from '../ui/UserAvatar';
 
@@ -75,12 +76,14 @@ export const MainSidebar: React.FC = () => {
   const isSuperAdmin = !!useAuthStore((s) => s.currentUser?.isSuperAdmin);
   const currentUser = useAuthStore((s) => s.currentUser);
   const hydrateProfile = useAuthStore((s) => s._hydrateProfile);
-  const { myMemberships, canAdminEvent } = useContextStore();
+  const { myMemberships, canAdminEvent, currentEventId } = useContextStore();
   const isDeptHead = myMemberships.some((m) => m.role === 'DEPT_HEAD');
   const [collapsed, setCollapsed] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const totalUnread = Object.values(useChatStore((s)=> s.unread)).reduce((a,b)=>a+(b||0),0);
+  const meId = useAuthStore((s)=> s.currentUser?.id);
+  const [hasZoneAssignment, setHasZoneAssignment] = useState<boolean>(false);
 
   useEffect(() => {
     if (currentUser && !currentUser.fullName) {
@@ -93,6 +96,27 @@ export const MainSidebar: React.FC = () => {
     if (location.pathname.startsWith('/admin/settings')) setEventOpen(true);
     if (location.pathname.startsWith('/tasks')) setTasksOpen(true);
   }, [location.pathname]);
+
+  // Determine if user has any zone assignment; if not, hide Zones link
+  useEffect(() => {
+    let mounted = true;
+    async function checkZones() {
+      try {
+        if (!currentEventId || !meId) { if (mounted) setHasZoneAssignment(false); return; }
+        const zones = await zonesService.list(currentEventId).catch(() => []);
+        if (!zones?.length) { if (mounted) setHasZoneAssignment(false); return; }
+        const rows = await Promise.all(
+          zones.map(z => zonesService.listAssignments(currentEventId, z.id).catch(() => []))
+        );
+        const any = rows.some(list => (list || []).some((a: any) => a.userId === meId));
+        if (mounted) setHasZoneAssignment(any);
+      } catch {
+        if (mounted) setHasZoneAssignment(false);
+      }
+    }
+    checkZones();
+    return () => { mounted = false; };
+  }, [currentEventId, meId]);
 
   return (
     <div className={`${collapsed ? 'w-16' : 'w-64'} relative h-screen bg-gray-800 text-white flex flex-col p-3 transition-all duration-200`}>
@@ -138,7 +162,9 @@ export const MainSidebar: React.FC = () => {
           {!collapsed && tasksOpen && (
             <div className="mt-1">
               <NavItem to="/tasks/central" icon={Building2} label="Central Departments" collapsed={collapsed} child />
-              <NavItem to="/tasks/zones" icon={MapPin} label="Zones" collapsed={collapsed} child />
+              {(isSuperAdmin || canAdminEvent || hasZoneAssignment) && (
+                <NavItem to="/tasks/zones" icon={MapPin} label="Zones" collapsed={collapsed} child />
+              )}
             </div>
           )}
         </div>

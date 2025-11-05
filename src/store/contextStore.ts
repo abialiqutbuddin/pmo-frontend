@@ -110,11 +110,38 @@ export const useContextStore = create<ContextState>((set, get) => ({
       // list departments
       const depts = await api.get<Department[]>(`/events/${eventId}/departments`);
 
-      // memberships
+      // memberships (event-level)
       const members = await api.get<{ userId: string; role: EventRole; departmentId?: string | null }[]>(
         `/events/${eventId}/members`,
       );
-      const my = members.filter((m) => m.userId === auth.currentUser?.id);
+      let my = members.filter((m) => m.userId === auth.currentUser?.id);
+
+      // Robust fallback: if we don't see multiple dept-scoped memberships here,
+      // probe department members per department to reconstruct accurate dept roles.
+      // This handles backends that return deduped event members.
+      const myDeptScoped = my.filter((m) => !!m.departmentId);
+      if ((myDeptScoped.length <= 1) && depts.length > 1) {
+        try {
+          const rows = await Promise.all(
+            depts.map(async (d) => {
+              try {
+                const r = await api.get<{ userId: string; role: EventRole; departmentId: string }[]>(
+                  `/events/${eventId}/departments/${d.id}/members`
+                );
+                const me = (r || []).find((m) => m.userId === auth.currentUser?.id);
+                return me ? { role: me.role as EventRole, departmentId: d.id } : null;
+              } catch {
+                return null;
+              }
+            })
+          );
+          const reconstructed = rows.filter(Boolean) as { role: EventRole; departmentId: string }[];
+          if (reconstructed.length) {
+            const eventScoped = my.filter((m) => !m.departmentId).map((m) => ({ role: m.role, departmentId: null as any }));
+            my = [...eventScoped, ...reconstructed];
+          }
+        } catch {}
+      }
 
       let currentDeptId = get().currentDeptId;
       const deptIds = unique(my.map((m) => m.departmentId || '').filter(Boolean) as string[]);

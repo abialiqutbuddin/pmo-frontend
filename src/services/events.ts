@@ -25,7 +25,15 @@ export const eventsService = {
         const now = Date.now();
         const cached = cache.get(eventId);
         if (!opts?.force && cached && now - cached.ts < TTL) return cached.data;
-        const data = (await api.get<EventMember[]>(`/events/${eventId}/members`)) || [];
+        const rows = (await api.get<any[]>(`/events/${eventId}/members`)) || [];
+        // Deduplicate by userId so consumers that need a unique user list
+        // (e.g., member pickers) stay stable even if the API returns
+        // department-scoped memberships.
+        const byUser = new Map<string, EventMember>();
+        for (const r of rows) {
+          if (!byUser.has(r.userId)) byUser.set(r.userId, { userId: r.userId, user: r.user });
+        }
+        const data = Array.from(byUser.values()).sort((a, b) => (a.user?.fullName || '').localeCompare(b.user?.fullName || ''));
         cache.set(eventId, { ts: now, data });
         return data;
       };
