@@ -12,6 +12,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { LayoutGrid, List as ListIcon, Calendar, Eye, Pencil, Trash2, Flag, Plus, FileText, Download } from 'lucide-react';
 import { UserAvatar } from '../components/ui/UserAvatar';
 import { TaskDetailsDrawer } from '../components/tasks/TaskDetailsDrawer';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { SideDrawer } from '../components/ui/SideDrawer';
 import { TasksBoardView } from '../components/tasks/TaskBoardView';
 import { VenueSelect } from '../components/tasks/VenueSelect';
@@ -143,6 +144,9 @@ export const CentralTasksPage: React.FC = () => {
     title: string; description: string; priority: number; startAt: string; dueAt: string;
     assigneeId: string; venueId: string; type: TaskType; status: TaskStatus; progressPct: number;
   }>({ title: '', description: '', priority: 3, startAt: '', dueAt: '', assigneeId: '', venueId: '', type: 'new_task', status: 'todo', progressPct: 0 });
+
+  // Delete confirmation modal state
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; task?: TaskItem }>(() => ({ open: false }));
 
   const accessibleDepts = useMemo(() => {
     if (isSuperAdmin || canAdminEvent) return departments;
@@ -504,15 +508,8 @@ export const CentralTasksPage: React.FC = () => {
       progressPct: t.progressPct || 0,
     });
   }
-  async function removeTask(task: TaskItem) {
-    if (!currentEventId || !task.departmentId) return;
-    if (!confirm('Delete this task?')) return;
-    try {
-      await tasksService.remove(currentEventId, task.departmentId, task.id);
-      setTasks((prev) => prev.filter((t) => t.id !== task.id));
-    } catch {
-      alert('Failed to delete task');
-    }
+  function removeTask(task: TaskItem) {
+    setConfirmDelete({ open: true, task });
   }
   async function saveEdit() {
     if (!currentEventId || !editing || !editing.departmentId) return;
@@ -1251,6 +1248,41 @@ export const CentralTasksPage: React.FC = () => {
           </div>
         </SideDrawer>
       )}
+      {/* Delete confirmation modal */}
+      <ConfirmDialog
+        open={confirmDelete.open}
+        title="Delete Task"
+        message={(() => {
+          const t = confirmDelete.task;
+          if (!t) return '';
+          const dn = departments.find((d) => d.id === t.departmentId)?.name || t.departmentId || '';
+          return `Title: ${t.title}\nDepartment: ${dn}\n\nThis action cannot be undone. Continue?`;
+        })()}
+        confirmText="Delete"
+        cancelText="Cancel"
+        danger
+        onCancel={() => setConfirmDelete({ open: false })}
+        onConfirm={async () => {
+          const t = confirmDelete.task;
+          if (!t || !currentEventId || !t.departmentId) { setConfirmDelete({ open: false }); return; }
+          try {
+            await tasksService.remove(currentEventId, t.departmentId, t.id);
+            // Update flat list
+            setTasks((prev) => prev.filter((x) => x.id !== t.id));
+            // Update per-dept map for ALL view
+            setTasksByDept((prev) => {
+              const next = { ...prev } as Record<string, TaskItem[]>;
+              const did = t.departmentId!;
+              if (next[did]) next[did] = next[did].filter((x) => x.id !== t.id);
+              return next;
+            });
+          } catch {
+            alert('Failed to delete task');
+          } finally {
+            setConfirmDelete({ open: false });
+          }
+        }}
+      />
     </Page>
   );
 };
