@@ -3,9 +3,9 @@ import { create } from 'zustand';
 import type { TaskStatus } from '../types/task';
 
 type TasksPageState = {
-  deptId: string;
+  deptIds: string[];
   viewMode: 'list' | 'board';
-  statusFilter: TaskStatus | 'all';
+  statusFilters: string[];
   priorityFilter: number | 'all';
   q: string;
   memberFilter?: string | 'all';
@@ -36,9 +36,9 @@ type PageState = {
 
 export const usePageStateStore = create<PageState>((set) => ({
   tasks: {
-    deptId: '',
+    deptIds: [],
     viewMode: 'list',
-    statusFilter: 'all',
+    statusFilters: [],
     priorityFilter: 'all',
     q: '',
     memberFilter: 'all',

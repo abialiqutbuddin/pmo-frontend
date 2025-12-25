@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Page } from '../components/layout/Page';
 import { useContextStore } from '../store/contextStore';
+import { useAuthStore } from '../store/authStore';
 import { zonesService, type ZoneItem } from '../services/zones';
 import { eventsService } from '../services/events';
 import { Spinner } from '../components/ui/Spinner';
@@ -11,58 +12,53 @@ import { MapPin, Plus, Wrench, Trash2 } from 'lucide-react';
 
 export const ManageZonesPage: React.FC = () => {
   const { currentEventId, currentEventName, canAdminEvent } = useContextStore();
+  const isSA = !!useAuthStore((s) => s.currentUser?.isSuperAdmin);
+  const isTM = !!useAuthStore((s) => s.currentUser?.isTenantManager);
 
   const [zonesEnabled, setZonesEnabled] = useState(false);
   const [zones, setZones] = useState<ZoneItem[]>([]);
   const [zonesLoading, setZonesLoading] = useState(false);
-  const [zoneErr, setZoneErr] = useState<string | null>(null);
   const [newZoneName, setNewZoneName] = useState('');
+  const [zoneErr, setZoneErr] = useState<string | null>(null);
 
   const [zdeptName, setZdeptName] = useState('');
   const [zdeptList, setZdeptList] = useState<{ id: string; name: string }[]>([]);
 
-  const [eventMembers, setEventMembers] = useState<{ userId: string; user?: { id: string; fullName?: string; email?: string } }[]>([]);
-  const [pocsByZone, setPocsByZone] = useState<Record<string, { userId: string; user?: { id: string; fullName?: string; email?: string } }[]>>({});
   const [editingZone, setEditingZone] = useState<ZoneItem | null>(null);
-  const [assignments, setAssignments] = useState<{ userId: string; role: 'HEAD'|'POC'|'MEMBER'; user?: { id: string; fullName?: string; email?: string } }[]>([]);
+  const [assignments, setAssignments] = useState<{ userId: string; role: 'HEAD' | 'POC' | 'MEMBER'; user?: { fullName: string; email: string } }[]>([]);
   const [addUserId, setAddUserId] = useState('');
-  const [addRole, setAddRole] = useState<'HEAD'|'POC'|'MEMBER'>('MEMBER');
-  // remove per-zone department assignment UI per requirements
+  const [addRole, setAddRole] = useState<'HEAD' | 'POC' | 'MEMBER'>('MEMBER');
+
+  const [eventMembers, setEventMembers] = useState<{ userId: string; user?: { fullName: string } }[]>([]);
 
   useEffect(() => {
+    if (!currentEventId) return;
+    let mounted = true;
     (async () => {
-      if (!currentEventId || !canAdminEvent) return;
-      const e = await eventsService.get(currentEventId);
-      setZonesEnabled(!!e?.zonesEnabled);
-      if (e?.zonesEnabled) {
-        setZonesLoading(true);
-        try {
-          const zs = await zonesService.list(currentEventId);
-          setZones(zs || []);
-          const templates = await zonesService.listZonalDepts(currentEventId);
-          setZdeptList(templates || []);
-        } finally {
-          setZonesLoading(false);
+      try {
+        const e = await eventsService.get(currentEventId);
+        if (mounted) setZonesEnabled(!!e.zonesEnabled);
+
+        if (e.zonesEnabled) {
+          setZonesLoading(true);
+          const z = await zonesService.list(currentEventId).catch(() => []);
+          const zd = await zonesService.listZonalDepts(currentEventId).catch(() => []);
+          if (mounted) {
+            setZones(z || []);
+            setZdeptList(zd || []);
+          }
         }
+      } catch { } finally {
+        if (mounted) setZonesLoading(false);
       }
-      const members = await eventsService.members.list(currentEventId).catch(() => []);
-      setEventMembers(members || []);
-    })();
-  }, [currentEventId, canAdminEvent]);
 
-  useEffect(() => {
-    (async () => {
-      if (!currentEventId) return;
-      const map: Record<string, any[]> = {};
-      for (const z of zones) {
-        const rows = await zonesService.listPOCs(currentEventId, z.id).catch(() => []);
-        map[z.id] = rows || [];
-      }
-      setPocsByZone(map);
+      const em = await eventsService.members.list(currentEventId).catch(() => []);
+      if (mounted) setEventMembers(em || []);
     })();
-  }, [currentEventId, JSON.stringify(zones.map((z) => z.id))]);
+    return () => { mounted = false; };
+  }, [currentEventId]);
 
-  if (!canAdminEvent) return <div className="p-6">You do not have admin permissions for this event.</div>;
+  if (!canAdminEvent && !isSA && !isTM) return <div className="p-6">You do not have admin permissions for this event.</div>;
 
   return (
     <Page className="space-y-6">
@@ -86,7 +82,7 @@ export const ManageZonesPage: React.FC = () => {
                 setZonesEnabled(enabled);
                 try {
                   await zonesService.toggle(currentEventId!, enabled);
-                } catch {}
+                } catch { }
                 if (enabled) {
                   setZonesLoading(true);
                   const zs = await zonesService.list(currentEventId!).catch(() => []);
@@ -180,8 +176,8 @@ export const ManageZonesPage: React.FC = () => {
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <div className="font-medium mb-2">Zonal Departments (applies to all zones)</div>
               <div className="flex items-center gap-2 mb-2">
-                <input className="flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" placeholder="New zonal department name" value={zdeptName} onChange={(e)=> setZdeptName(e.target.value)} />
-                <button className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm" onClick={async ()=>{ const name = zdeptName.trim(); if (!name) return; await zonesService.createZonalDept(currentEventId!, name); setZdeptName(''); const list = await zonesService.listZonalDepts(currentEventId!); setZdeptList(list||[]); }}><Plus size={16} className="mr-1"/>Add</button>
+                <input className="flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" placeholder="New zonal department name" value={zdeptName} onChange={(e) => setZdeptName(e.target.value)} />
+                <button className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm" onClick={async () => { const name = zdeptName.trim(); if (!name) return; await zonesService.createZonalDept(currentEventId!, name); setZdeptName(''); const list = await zonesService.listZonalDepts(currentEventId!); setZdeptList(list || []); }}><Plus size={16} className="mr-1" />Add</button>
               </div>
               <div className="overflow-x-auto border border-gray-200 rounded">
                 <table className="w-full text-sm">
@@ -192,23 +188,23 @@ export const ManageZonesPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {zdeptList.map((d)=> (
+                    {zdeptList.map((d) => (
                       <tr key={d.id} className="border-b last:border-0">
                         <td className="px-4 py-2">{d.name}</td>
                         <td className="px-4 py-2 text-right whitespace-nowrap">
-                          <button className="text-gray-800 hover:text-black mr-3" onClick={async ()=>{
+                          <button className="text-gray-800 hover:text-black mr-3" onClick={async () => {
                             const next = prompt('Rename zonal department', d.name)?.trim();
-                            if (!next || next===d.name) return;
-                            try { await zonesService.updateZonalDept(currentEventId!, d.id, next); const list = await zonesService.listZonalDepts(currentEventId!); setZdeptList(list||[]); } catch (e:any) { alert(e?.message||'Failed to rename'); }
+                            if (!next || next === d.name) return;
+                            try { await zonesService.updateZonalDept(currentEventId!, d.id, next); const list = await zonesService.listZonalDepts(currentEventId!); setZdeptList(list || []); } catch (e: any) { alert(e?.message || 'Failed to rename'); }
                           }}>Rename</button>
-                          <button className="text-rose-600 hover:text-rose-700" onClick={async ()=>{
+                          <button className="text-rose-600 hover:text-rose-700" onClick={async () => {
                             if (!confirm('Delete this zonal department? It will be removed from all zones.')) return;
-                            try { await zonesService.deleteZonalDept(currentEventId!, d.id); const list = await zonesService.listZonalDepts(currentEventId!); setZdeptList(list||[]); } catch (e:any) { alert(e?.message||'Failed to delete'); }
+                            try { await zonesService.deleteZonalDept(currentEventId!, d.id); const list = await zonesService.listZonalDepts(currentEventId!); setZdeptList(list || []); } catch (e: any) { alert(e?.message || 'Failed to delete'); }
                           }}>Delete</button>
                         </td>
                       </tr>
                     ))}
-                    {zdeptList.length===0 && (
+                    {zdeptList.length === 0 && (
                       <tr><td className="px-4 py-3 text-sm text-gray-500">No zonal departments yet.</td></tr>
                     )}
                   </tbody>
@@ -232,17 +228,17 @@ export const ManageZonesPage: React.FC = () => {
               <div className="grid md:grid-cols-3 gap-2">
                 <div className="md:col-span-2">
                   <label className="block text-sm mb-1">Zone Name</label>
-                  <input className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={editingZone.name} onChange={(e)=> setEditingZone({ ...editingZone, name: e.target.value })} />
+                  <input className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" value={editingZone.name} onChange={(e) => setEditingZone({ ...editingZone, name: e.target.value })} />
                 </div>
                 <div className="flex items-end">
-                  <label className="inline-flex items-center text-sm"><input type="checkbox" className="mr-2" checked={editingZone.enabled} onChange={(e)=> setEditingZone({ ...editingZone, enabled: e.target.checked })}/> Enabled</label>
+                  <label className="inline-flex items-center text-sm"><input type="checkbox" className="mr-2" checked={editingZone.enabled} onChange={(e) => setEditingZone({ ...editingZone, enabled: e.target.checked })} /> Enabled</label>
                 </div>
               </div>
               <div className="mt-2 text-right">
-                <button className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm" onClick={async ()=>{
+                <button className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm" onClick={async () => {
                   const updated = await zonesService.update(currentEventId!, editingZone.id, { name: editingZone.name, enabled: editingZone.enabled });
                   // reflect in list
-                  setZones((prev)=> prev.map(z=> z.id===updated.id ? updated : z));
+                  setZones((prev) => prev.map(z => z.id === updated.id ? updated : z));
                 }}>Save Details</button>
               </div>
             </div>
@@ -252,16 +248,16 @@ export const ManageZonesPage: React.FC = () => {
             <div>
               <div className="font-medium mb-2">Assignments (Head, POC, Members)</div>
               <div className="flex items-center gap-2 mb-2">
-                <Dropdown value={addUserId} onChange={(v)=> setAddUserId(v)} options={[{ value: '', label: 'Select user' }, ...eventMembers.map(m=> ({ value: m.userId, label: m.user?.fullName || m.userId }))]} />
-                <Dropdown value={addRole} onChange={(v)=> setAddRole(v as any)} options={[{ value: 'MEMBER', label: 'Member' }, { value: 'POC', label: 'POC' }, { value: 'HEAD', label: 'Head' }]} />
-                <button className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-2 text-sm" disabled={!addUserId} onClick={async ()=>{
+                <Dropdown value={addUserId} onChange={(v) => setAddUserId(v)} options={[{ value: '', label: 'Select user' }, ...eventMembers.map(m => ({ value: m.userId, label: m.user?.fullName || m.userId }))]} />
+                <Dropdown value={addRole} onChange={(v) => setAddRole(v as any)} options={[{ value: 'MEMBER', label: 'Member' }, { value: 'POC', label: 'POC' }, { value: 'HEAD', label: 'Head' }]} />
+                <button className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-2 text-sm" disabled={!addUserId} onClick={async () => {
                   await zonesService.addAssignment(currentEventId!, editingZone.id, { userId: addUserId, role: addRole });
-                  const u = eventMembers.find(m=> m.userId === addUserId)?.user;
-                  const exists = assignments.find(a=> a.userId === addUserId);
+                  const u = eventMembers.find(m => m.userId === addUserId)?.user;
+                  const exists = assignments.find(a => a.userId === addUserId);
                   if (exists) {
-                    setAssignments((prev)=> prev.map(a=> a.userId===addUserId ? { ...a, role: addRole } as any : a));
+                    setAssignments((prev) => prev.map(a => a.userId === addUserId ? { ...a, role: addRole } as any : a));
                   } else {
-                    setAssignments((prev)=> [{ userId: addUserId, role: addRole, user: u } as any, ...prev]);
+                    setAssignments((prev) => [{ userId: addUserId, role: addRole, user: u } as any, ...prev]);
                   }
                   setAddUserId('');
                 }}>Add</button>
@@ -277,19 +273,19 @@ export const ManageZonesPage: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {assignments.map((a)=> (
+                    {assignments.map((a) => (
                       <tr key={a.userId} className="border-b last:border-0">
                         <td className="px-4 py-2">{a.user?.fullName || a.userId}</td>
                         <td className="px-4 py-2">{a.user?.email || '-'}</td>
                         <td className="px-4 py-2">
-                          <Dropdown value={a.role} onChange={async (v)=>{ await zonesService.updateAssignment(currentEventId!, editingZone.id, a.userId, v as any); setAssignments((prev)=> prev.map(x=> x.userId===a.userId ? { ...x, role: v as any } : x)); }} options={[{ value: 'MEMBER', label: 'Member' }, { value: 'POC', label: 'POC' }, { value: 'HEAD', label: 'Head' }]} />
+                          <Dropdown value={a.role} onChange={async (v) => { await zonesService.updateAssignment(currentEventId!, editingZone.id, a.userId, v as any); setAssignments((prev) => prev.map(x => x.userId === a.userId ? { ...x, role: v as any } : x)); }} options={[{ value: 'MEMBER', label: 'Member' }, { value: 'POC', label: 'POC' }, { value: 'HEAD', label: 'Head' }]} />
                         </td>
                         <td className="px-4 py-2 text-right">
-                          <button className="text-rose-600 hover:text-rose-700" onClick={async ()=>{ await zonesService.removeAssignment(currentEventId!, editingZone.id, a.userId); setAssignments((prev)=> prev.filter(x=> x.userId !== a.userId)); }}>Remove</button>
+                          <button className="text-rose-600 hover:text-rose-700" onClick={async () => { await zonesService.removeAssignment(currentEventId!, editingZone.id, a.userId); setAssignments((prev) => prev.filter(x => x.userId !== a.userId)); }}>Remove</button>
                         </td>
                       </tr>
                     ))}
-                    {assignments.length===0 && (
+                    {assignments.length === 0 && (
                       <tr><td colSpan={4} className="px-4 py-3 text-sm text-gray-500">No assignments yet.</td></tr>
                     )}
                   </tbody>

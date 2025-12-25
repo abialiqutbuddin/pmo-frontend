@@ -1,6 +1,8 @@
 // frontend/src/pages/AdminUsersPage.tsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { usersService, type User } from '../services/users';
+import { eventsService } from '../services/events';
+import { rolesService, type Role } from '../services/roles';
 import { Users2, Plus, Pencil, Trash2, ToggleLeft, ToggleRight, Shield } from 'lucide-react';
 import { SideDrawer } from '../components/ui/SideDrawer';
 import { Spinner } from '../components/ui/Spinner';
@@ -24,13 +26,23 @@ export const AdminUsersPage: React.FC = () => {
   const [organization, setOrganization] = useState('');
   const [designation, setDesignation] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [isSA, setIsSA] = useState(false);
+  const [isTM, setIsTM] = useState(false);
   const [isDisabled, setIsDisabled] = useState(false);
+
+  // Event assignment state
+  const [availableEvents, setAvailableEvents] = useState<{ id: string; name: string }[]>([]);
+  const [selectedEventIds, setSelectedEventIds] = useState<Set<string>>(new Set());
+  const [loadingEvents, setLoadingEvents] = useState(false);
+
+  // Role assignment state
+  const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
+
   const [editing, setEditing] = useState<User | null>(null);
   const [editFullName, setEditFullName] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
-  const [editSA, setEditSA] = useState(false);
+  const [editTM, setEditTM] = useState(false);
   const [editDisabled, setEditDisabled] = useState(false);
   const [editItsId, setEditItsId] = useState('');
   const [editOrg, setEditOrg] = useState('');
@@ -38,6 +50,7 @@ export const AdminUsersPage: React.FC = () => {
   const [editPhone, setEditPhone] = useState('');
   const [editProfile, setEditProfile] = useState('');
 
+  // Load users on mount
   useEffect(() => {
     let mounted = true;
     setLoading(true);
@@ -51,6 +64,31 @@ export const AdminUsersPage: React.FC = () => {
       mounted = false;
     };
   }, []);
+
+  // Fetch events and roles when create drawer opens
+  useEffect(() => {
+    if (showCreate) {
+      setLoadingEvents(true);
+
+      Promise.all([
+        eventsService.list(),
+        rolesService.list()
+      ])
+        .then(([events, roles]) => {
+          setAvailableEvents(events);
+          setAvailableRoles(roles);
+        })
+        .catch(console.error)
+        .finally(() => setLoadingEvents(false));
+
+      // Reset selection when opening
+      setSelectedEventIds(new Set());
+      setSelectedRoleId('');
+    } else {
+      setSelectedEventIds(new Set());
+      setSelectedRoleId('');
+    }
+  }, [showCreate]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -79,8 +117,10 @@ export const AdminUsersPage: React.FC = () => {
         organization: organization.trim() || undefined,
         designation: designation.trim() || undefined,
         phoneNumber: phoneNumber.trim() || undefined,
-        isSuperAdmin: !!isSA,
+        isTenantManager: !!isTM,
         isDisabled: !!isDisabled,
+        eventIds: Array.from(selectedEventIds),
+        eventRoleId: selectedRoleId || undefined,
       });
       setRows((prev) => [u, ...prev]);
       setAdminUsers({ showCreate: false });
@@ -91,8 +131,9 @@ export const AdminUsersPage: React.FC = () => {
       setOrganization('');
       setDesignation('');
       setPhoneNumber('');
-      setIsSA(false);
+      setIsTM(false);
       setIsDisabled(false);
+      setSelectedRoleId('');
     } catch (e: any) {
       setErr(e?.message || 'Failed to create user');
     } finally {
@@ -156,7 +197,7 @@ export const AdminUsersPage: React.FC = () => {
                 <th className="text-left px-4 py-2 text-gray-600">Org</th>
                 <th className="text-left px-4 py-2 text-gray-600">Designation</th>
                 <th className="text-left px-4 py-2 text-gray-600">Phone</th>
-                <th className="text-left px-4 py-2 text-gray-600">Super Admin</th>
+                <th className="text-left px-4 py-2 text-gray-600">Tenant Manager</th>
                 <th className="text-left px-4 py-2 text-gray-600">Status</th>
                 <th className="text-right px-4 py-2 text-gray-600">Actions</th>
               </tr>
@@ -172,11 +213,11 @@ export const AdminUsersPage: React.FC = () => {
                   <td className="px-4 py-2">{u.phoneNumber || '—'}</td>
                   <td className="px-4 py-2">
                     <button
-                      className={`inline-flex items-center rounded px-2 py-1 border text-xs ${u.isSuperAdmin ? 'border-fuchsia-300 text-fuchsia-700 bg-fuchsia-50' : 'border-gray-300 text-gray-700 bg-gray-50'}`}
-                      onClick={() => updateUser(u.id, { isSuperAdmin: !u.isSuperAdmin })}
-                      title="Toggle Super Admin"
+                      className={`inline-flex items-center rounded px-2 py-1 border text-xs ${u.isTenantManager ? 'border-fuchsia-300 text-fuchsia-700 bg-fuchsia-50' : 'border-gray-300 text-gray-700 bg-gray-50'}`}
+                      onClick={() => updateUser(u.id, { isTenantManager: !u.isTenantManager })}
+                      title="Toggle Tenant Manager"
                     >
-                      <Shield size={14} className="mr-1" /> {u.isSuperAdmin ? 'Super Admin' : 'Standard'}
+                      <Shield size={14} className="mr-1" /> {u.isTenantManager ? 'Manager' : 'Standard'}
                     </button>
                   </td>
                   <td className="px-4 py-2">
@@ -204,7 +245,7 @@ export const AdminUsersPage: React.FC = () => {
                         setEditFullName(u.fullName);
                         setEditEmail(u.email);
                         setEditPassword('');
-                        setEditSA(!!u.isSuperAdmin);
+                        setEditTM(!!u.isTenantManager);
                         setEditDisabled(!!u.isDisabled);
                         setEditItsId(u.itsId || '');
                         setEditOrg(u.organization || '');
@@ -307,13 +348,52 @@ export const AdminUsersPage: React.FC = () => {
 
           <div className="flex items-center gap-6 pt-2">
             <label className="inline-flex items-center text-sm text-gray-700">
-              <input type="checkbox" className="mr-2" checked={isSA} onChange={(e) => setIsSA(e.target.checked)} />
-              Super Admin
+              <input type="checkbox" className="mr-2" checked={isTM} onChange={(e) => setIsTM(e.target.checked)} />
+              Tenant Manager
             </label>
             <label className="inline-flex items-center text-sm text-gray-700">
               <input type="checkbox" className="mr-2" checked={isDisabled} onChange={(e) => setIsDisabled(e.target.checked)} />
               Disabled
             </label>
+          </div>
+
+          <div className="border-t pt-3">
+            <label className="block text-sm mb-2 font-medium">Assign to Events (Optional)</label>
+            {loadingEvents ? <div className="text-center text-sm py-2">Loading events...</div> : (
+              <div className="border rounded-md max-h-40 overflow-y-auto bg-white p-1 space-y-1">
+                {availableEvents.length === 0 ? <div className="text-sm text-gray-400 p-2">No events found.</div> : availableEvents.map(ev => (
+                  <label key={ev.id} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mr-2"
+                      checked={selectedEventIds.has(ev.id)}
+                      onChange={e => {
+                        const next = new Set(selectedEventIds);
+                        if (e.target.checked) next.add(ev.id);
+                        else next.delete(ev.id);
+                        setSelectedEventIds(next);
+                      }}
+                    />
+                    <span className="text-sm">{ev.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            {selectedEventIds.size > 0 && (
+              <div className="mt-3">
+                <label className="block text-sm mb-1 font-medium">Role for selected events</label>
+                <select
+                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-600"
+                  value={selectedRoleId}
+                  onChange={e => setSelectedRoleId(e.target.value)}
+                >
+                  <option value="">No specific role</option>
+                  {availableRoles.map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
@@ -417,10 +497,10 @@ export const AdminUsersPage: React.FC = () => {
                   <input
                     type="checkbox"
                     className="mr-2"
-                    checked={editSA}
-                    onChange={(e) => setEditSA(e.target.checked)}
+                    checked={editTM}
+                    onChange={(e) => setEditTM(e.target.checked)}
                   />
-                  Super Admin
+                  Tenant Manager
                 </label>
                 <label className="inline-flex items-center text-sm text-gray-700">
                   <input
@@ -452,7 +532,7 @@ export const AdminUsersPage: React.FC = () => {
                     organization: editOrg || undefined,
                     designation: editDesig || undefined,
                     phoneNumber: editPhone || undefined,
-                    isSuperAdmin: editSA,
+                    isTenantManager: editTM,
                     isDisabled: editDisabled,
                   };
                   if (editPassword) patch.password = editPassword;

@@ -6,6 +6,7 @@ export type DeptRole = 'DEPT_HEAD' | 'DEPT_MEMBER' | 'OBSERVER';
 export interface Department {
   id: string;
   name: string;
+  parentId?: string | null;
 }
 
 export interface DeptMemberUser {
@@ -35,7 +36,7 @@ export const departmentsService = {
       return data;
     };
   })(),
-  create: (eventId: string, name: string) => api.post<Department>(`/events/${eventId}/departments`, { name }),
+  create: (eventId: string, name: string, parentId?: string) => api.post<Department>(`/events/${eventId}/departments`, { name, parentId }),
   rename: (eventId: string, departmentId: string, name: string) =>
     api.patch<Department>(`/events/${eventId}/departments/${departmentId}`, { name }),
   remove: (eventId: string, departmentId: string) => api.delete<void>(`/events/${eventId}/departments/${departmentId}`),

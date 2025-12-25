@@ -17,20 +17,22 @@ export interface Attachment {
 export const attachmentsService = {
   list: (eventId: string, entityType: AttachmentEntityType, entityId: string) =>
     api.get<Attachment[]>(`/events/${eventId}/attachments?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`),
-  upload: (eventId: string, entityType: AttachmentEntityType, entityId: string, file: File) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('entityType', entityType);
-    fd.append('entityId', entityId);
-    return api.post<void>(`/events/${eventId}/attachments/upload`, fd);
+  async upload(eventId: string, entityType: string, entityId: string, file: File, skipAudit = false): Promise<void> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entityType', entityType);
+    formData.append('entityId', entityId);
+
+    await api.post(`/events/${eventId}/attachments/upload?skipAudit=${skipAudit}`, formData);
   },
   remove: (eventId: string, id: string) => api.delete<void>(`/events/${eventId}/attachments/${encodeURIComponent(id)}`),
   uploadWithProgress: (eventId: string, entityType: AttachmentEntityType, entityId: string, file: File, onProgress?: (pct: number) => void) => {
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${BASE_URL}/events/${encodeURIComponent(eventId)}/attachments/upload`);
-      const token = useAuthStore.getState().accessToken;
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      const { accessToken, tenantId } = useAuthStore.getState();
+      if (accessToken) xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`);
+      if (tenantId) xhr.setRequestHeader('X-Tenant-ID', tenantId);
       xhr.upload.onprogress = (e) => {
         if (!e.lengthComputable) return;
         const pct = Math.round((e.loaded / e.total) * 100);

@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react';
 
 export type Option = { value: string; label: string; disabled?: boolean };
 
-interface DropdownProps {
+export interface DropdownProps {
   value: string;
   onChange: (v: string) => void;
   options: Option[];
@@ -13,6 +13,7 @@ interface DropdownProps {
   className?: string;
   title?: string;
   fullWidth?: boolean;
+  renderTrigger?: () => React.ReactNode;
 }
 
 export const Dropdown: React.FC<DropdownProps> = ({
@@ -24,7 +25,30 @@ export const Dropdown: React.FC<DropdownProps> = ({
   className,
   title,
   fullWidth,
+  renderTrigger,
 }) => {
+  if (renderTrigger) {
+    return (
+      <div className={`relative inline-block ${fullWidth ? 'w-full' : ''}`}>
+        <div className="relative z-0">{renderTrigger()}</div>
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          title={title}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+        >
+          {placeholder && <option value="" disabled>{placeholder}</option>}
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value} disabled={opt.disabled}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
   return (
     <div className={fullWidth ? 'w-full relative' : 'relative inline-block'}>
       <select

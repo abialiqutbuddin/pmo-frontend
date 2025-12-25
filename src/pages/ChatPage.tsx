@@ -81,6 +81,8 @@ export const ChatPage: React.FC = () => {
             members: [],
             lastMessage: { id: '', content: '', createdAt: '', sender: { id: '', name: '' }, roomId: activeRoom.id },
           }}
+          isActive={activeRoom.isActive !== false}
+          isSystemGroup={activeRoom.isSystemGroup === true}
         />
       ) : (
         <div className="flex-1 flex items-center justify-center text-gray-500">Select a chat to start messaging</div>

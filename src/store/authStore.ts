@@ -6,6 +6,7 @@ type JwtClaims = {
   sub: string;
   email: string;
   isSuperAdmin: boolean;
+  isTenantManager: boolean;
   iat?: number;
   exp?: number;
 };
@@ -14,9 +15,12 @@ type CurrentUser = {
   id: string;
   email: string;
   isSuperAdmin: boolean;
+  isTenantManager: boolean;
   fullName?: string;
   profileImage?: string | null;
   itsId?: string | null;
+  permissions?: string[]; // array of "module:action"
+  roles?: { id: string; name: string }[];
 };
 
 function parseJwt(token: string): JwtClaims | null {
@@ -32,17 +36,21 @@ function parseJwt(token: string): JwtClaims | null {
 interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
+  tenantId: string | null;
   currentUser: CurrentUser | null;
 
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, tenantId?: string) => Promise<void>;
+  lookupTenants: (email: string) => Promise<{ id: string; name: string; slug: string }[]>;
   tryRefresh: () => Promise<boolean>;
   logout: (all?: boolean) => Promise<void>;
   clearAuth: () => void;
   _hydrateProfile: () => Promise<void>;
+  hasPermission: (module: string, action: string) => boolean;
 }
 
 const initialAccess = typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null;
 const initialRefresh = typeof localStorage !== 'undefined' ? localStorage.getItem('refreshToken') : null;
+const initialTenant = typeof localStorage !== 'undefined' ? localStorage.getItem('tenantId') : null;
 let initialUser: CurrentUser | null = null;
 
 if (initialAccess) {
@@ -52,6 +60,7 @@ if (initialAccess) {
       id: claims.sub,
       email: (claims.email as string) || '',
       isSuperAdmin: !!claims.isSuperAdmin,
+      isTenantManager: !!claims.isTenantManager,
     };
   }
 }
@@ -59,35 +68,66 @@ if (initialAccess) {
 export const useAuthStore = create<AuthState>((set, get) => ({
   accessToken: initialAccess,
   refreshToken: initialRefresh,
+  tenantId: initialTenant,
   currentUser: initialUser,
+
+  hasPermission: (module, action) => {
+    const u = get().currentUser;
+    if (!u) return false;
+    if (u.isSuperAdmin || u.isTenantManager) return true;
+    if (!u.permissions) return false;
+    return u.permissions.includes(`${module}:${action}`);
+  },
 
   clearAuth: () => {
     try {
       localStorage.removeItem('accessToken');
       localStorage.removeItem('refreshToken');
-    } catch {}
-    set({ accessToken: null, refreshToken: null, currentUser: null });
+      localStorage.removeItem('tenantId');
+      localStorage.removeItem('currentEventId');
+      localStorage.removeItem('currentEventName');
+      localStorage.removeItem('currentDeptId');
+    } catch { }
+    set({ accessToken: null, refreshToken: null, tenantId: null, currentUser: null });
   },
 
   _hydrateProfile: async () => {
-    const { accessToken, currentUser } = get();
+    const { accessToken, currentUser, tenantId } = get();
     if (!accessToken || !currentUser?.id) return;
     try {
+      const headers: Record<string, string> = {
+        Authorization: `Bearer ${accessToken}`,
+      };
+      if (tenantId) headers['X-Tenant-ID'] = tenantId;
+
       const res = await fetch(`${BASE_URL}/users/${currentUser.id}`, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers,
       });
       if (!res.ok) return;
       const u: any = await res.json();
-      set({ currentUser: { ...currentUser, fullName: u.fullName, profileImage: u.profileImage ?? null, itsId: u.itsId ?? null } });
-    } catch {}
+
+      set({
+        currentUser: {
+          ...currentUser,
+          fullName: u.fullName,
+          profileImage: u.profileImage ?? null,
+          itsId: u.itsId ?? null,
+          isTenantManager: !!u.isTenantManager,
+          permissions: (u.permissions || []) as string[],
+          roles: u.roles || []
+        }
+      });
+    } catch { }
   },
 
-  login: async (email, password) => {
+  login: async (email, password, tenantId) => {
+    const resolvedTenant = tenantId || 'system';
     const res = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': resolvedTenant,
+      },
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) throw new Error('Invalid credentials');
@@ -96,16 +136,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       localStorage.setItem('accessToken', data.accessToken);
       localStorage.setItem('refreshToken', data.refreshToken);
-    } catch {}
+      localStorage.setItem('tenantId', resolvedTenant);
+    } catch { }
 
     const claims = parseJwt(data.accessToken);
     const user: CurrentUser | null = claims?.sub
-      ? { id: claims.sub, email: (claims.email as string) || '', isSuperAdmin: !!claims.isSuperAdmin }
+      ? { id: claims.sub, email: (claims.email as string) || '', isSuperAdmin: !!claims.isSuperAdmin, isTenantManager: !!claims.isTenantManager }
       : null;
 
-    set({ accessToken: data.accessToken, refreshToken: data.refreshToken, currentUser: user });
-    // hydrate profile (fullName, profileImage)
+    set({ accessToken: data.accessToken, refreshToken: data.refreshToken, tenantId: resolvedTenant, currentUser: user });
     await get()._hydrateProfile();
+  },
+
+  lookupTenants: async (email: string) => {
+    const res = await fetch(`${BASE_URL}/auth/lookup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      if (res.status === 404) return [];
+      throw new Error('Failed to lookup tenants');
+    }
+    return await res.json();
   },
 
   tryRefresh: async () => {
@@ -124,15 +177,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       localStorage.setItem('accessToken', data.accessToken);
       localStorage.setItem('refreshToken', data.refreshToken);
-    } catch {}
+    } catch { }
 
     const claims = parseJwt(data.accessToken);
     const user: CurrentUser | null = claims?.sub
-      ? { id: claims.sub, email: (claims.email as string) || '', isSuperAdmin: !!claims.isSuperAdmin }
+      ? { id: claims.sub, email: (claims.email as string) || '', isSuperAdmin: !!claims.isSuperAdmin, isTenantManager: !!claims.isTenantManager }
       : null;
 
     set({ accessToken: data.accessToken, refreshToken: data.refreshToken, currentUser: user });
-    // refresh profile in background
     void get()._hydrateProfile();
     return true;
   },

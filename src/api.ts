@@ -6,7 +6,7 @@ const RAW_BASE_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost
 export const BASE_URL = String(RAW_BASE_URL).replace(/\/+$/, '');
 
 async function request<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {
-  const { accessToken, tryRefresh, clearAuth } = useAuthStore.getState();
+  const { accessToken, tenantId, tryRefresh, clearAuth } = useAuthStore.getState();
 
   const headers = new Headers(init.headers || {});
 
@@ -15,6 +15,7 @@ async function request<T>(path: string, init: RequestInit = {}, retry = true): P
 
   // only attach Content-Type for non-FormData bodies
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  if (tenantId) headers.set('X-Tenant-ID', tenantId);
   headers.set('Accept', 'application/json');
   // Avoid ngrok browser warning HTML
   if (BASE_URL.includes('ngrok')) headers.set('ngrok-skip-browser-warning', 'true');
@@ -60,7 +61,13 @@ export const api = {
     request<T>(path, {
       method: 'POST',
       body: isFormData(body) ? body : body !== undefined ? JSON.stringify(body) : undefined,
-      // IMPORTANT: don't set Content-Type for FormData; the browser will add the boundary
+      headers: isFormData(body) ? undefined : { 'Content-Type': 'application/json' },
+    }),
+
+  put: <T,>(path: string, body?: unknown) =>
+    request<T>(path, {
+      method: 'PUT',
+      body: isFormData(body) ? body : body !== undefined ? JSON.stringify(body) : undefined,
       headers: isFormData(body) ? undefined : { 'Content-Type': 'application/json' },
     }),
 

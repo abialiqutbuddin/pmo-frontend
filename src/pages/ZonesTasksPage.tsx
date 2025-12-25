@@ -161,7 +161,7 @@ export const ZonesTasksPage: React.FC = () => {
     Promise.all(
       zoneIds.map(z => zonesService.listZoneZonalDepts(currentEventId, z).then(rows => rows || []).catch(() => []))
     ).then(all => {
-      const map: Record<string,string> = {};
+      const map: Record<string, string> = {};
       for (const rows of all) {
         for (const r of rows) map[r.id] = (r as any).templateId;
       }
@@ -197,15 +197,23 @@ export const ZonesTasksPage: React.FC = () => {
     return () => { mounted = false; };
   }, [currentEventId, tasks]);
 
-  // permissions
+  // permissions - use RBAC
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+
+  const canCreate = hasPermission('tasks', 'create');
+
   const canEditTask = (t: TaskItem) => {
-    if (isSuperAdmin) return true;
-    if (!t.departmentId) return false;
-    const roles = myMemberships.filter((m) => !m.departmentId || m.departmentId === t.departmentId).map((m) => m.role);
-    if (roles.includes('OWNER') || roles.includes('PMO_ADMIN') || roles.includes('DEPT_HEAD')) return true;
-    if (roles.includes('DEPT_MEMBER')) {
+    // Full update access via RBAC
+    if (hasPermission('tasks', 'update')) return true;
+    // Fallback: own tasks if user has read access
+    if (hasPermission('tasks', 'read')) {
       return t.creatorId === currentUserId || t.assigneeId === currentUserId;
     }
+    return false;
+  };
+
+  const canDeleteTask = (t: TaskItem) => {
+    if (hasPermission('tasks', 'delete')) return true;
     return false;
   };
 
@@ -422,13 +430,15 @@ export const ZonesTasksPage: React.FC = () => {
               />
             </div>
             {/* Add Task aligned to the right */}
-            <button
-              className="ml-auto inline-flex items-center px-3 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white shrink-0"
-              onClick={() => setShowCreate(true)}
-              title="Create zonal task"
-            >
-              <Plus size={16} className="mr-1" /> Add Task
-            </button>
+            {canCreate && (
+              <button
+                className="ml-auto inline-flex items-center px-3 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+                onClick={() => setShowCreate(true)}
+                title="Create zonal task"
+              >
+                <Plus size={16} className="mr-1" /> Add Task
+              </button>
+            )}
           </>
         )}
       </div>
@@ -498,8 +508,12 @@ export const ZonesTasksPage: React.FC = () => {
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap align-top">
                     <button className="text-gray-700 hover:text-black mr-3" onClick={() => openDetails(t)} title="View"><Eye size={16} /></button>
-                    <button className="text-gray-700 hover:text-black mr-3" onClick={() => openEdit(t)} title="Edit"><Pencil size={16} /></button>
-                    <button className="text-rose-600 hover:text-rose-700" onClick={() => removeTask(t)} disabled={!canEditTask(t)} title="Delete"><Trash2 size={16} /></button>
+                    {canEditTask(t) && (
+                      <button className="text-gray-700 hover:text-black mr-3" onClick={() => openEdit(t)} title="Edit"><Pencil size={16} /></button>
+                    )}
+                    {canDeleteTask(t) && (
+                      <button className="text-rose-600 hover:text-rose-700" onClick={() => removeTask(t)} title="Delete"><Trash2 size={16} /></button>
+                    )}
                   </td>
                 </tr>
               ))}

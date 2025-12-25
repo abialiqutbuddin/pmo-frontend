@@ -5,6 +5,8 @@ export type Conversation = {
   kind: 'EVENT' | 'DEPARTMENT' | 'ISSUE' | 'GROUP' | 'DIRECT';
   title?: string | null;
   departmentId?: string | null;
+  isActive?: boolean;
+  isSystemGroup?: boolean;
   updatedAt: string;
   lastMessage?: { id: string; authorId: string; body?: string | null; createdAt: string; author?: { id: string; fullName?: string; email?: string } } | null;
   participants?: { userId: string; lastReadAt?: string | null; user?: { id: string; fullName?: string; email?: string } }[];
@@ -31,11 +33,10 @@ export const chatService = {
   markRead: (payload: { conversationId: string }) => api.patch(`/chat/read`, payload),
   listMessages: (conversationId: string, opts?: { limit?: number; before?: string }) =>
     api.get<{ items: any[]; nextCursor?: string | null }>(
-      `/chat/conversations/${conversationId}/messages${
-        opts?.limit || opts?.before ? `?${new URLSearchParams({
-          ...(opts?.limit ? { limit: String(opts.limit) } : {}),
-          ...(opts?.before ? { before: opts.before } : {}),
-        }).toString()}` : ''
+      `/chat/conversations/${conversationId}/messages${opts?.limit || opts?.before ? `?${new URLSearchParams({
+        ...(opts?.limit ? { limit: String(opts.limit) } : {}),
+        ...(opts?.before ? { before: opts.before } : {}),
+      }).toString()}` : ''
       }`,
     ),
   createTaskFromMessage: (payload: {
@@ -51,4 +52,11 @@ export const chatService = {
   removeParticipant: (conversationId: string, userId: string) => api.delete(`/chat/conversations/${conversationId}/participants/${userId}`),
   updateParticipant: (conversationId: string, userId: string, body: { role?: 'MEMBER' | 'OWNER' }) => api.patch(`/chat/conversations/${conversationId}/participants/${userId}`, body),
   readers: (messageId: string) => api.get<{ userId: string; fullName?: string; email?: string; itsId?: string; profileImage?: string; readAt: string }[]>(`/chat/messages/${messageId}/readers`),
+  getPermissions: (eventId: string) => api.get<ChatPermissions>(`/chat/events/${eventId}/permissions`),
+};
+
+export type ChatPermissions = {
+  canViewAllSystemGroups: boolean;
+  canSendToSystemGroups: boolean;
+  canDeleteMessages: boolean;
 };

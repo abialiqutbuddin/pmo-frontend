@@ -7,6 +7,7 @@ export interface User {
   fullName: string;
   isDisabled: boolean;
   isSuperAdmin: boolean;
+  isTenantManager: boolean;
   createdAt: string;
   itsId?: string;
   profileImage?: string;
@@ -24,12 +25,15 @@ export interface CreateUserDto {
   designation?: string;
   phoneNumber?: string;
   isSuperAdmin?: boolean;
+  isTenantManager?: boolean;
   isDisabled?: boolean;
+  eventIds?: string[];
+  eventRoleId?: string;
 }
 
 export type UpdateUserDto = Partial<Pick<
   User,
-  'itsId' | 'fullName' | 'email' | 'profileImage' | 'organization' | 'designation' | 'phoneNumber' | 'isSuperAdmin' | 'isDisabled'
+  'itsId' | 'fullName' | 'email' | 'profileImage' | 'organization' | 'designation' | 'phoneNumber' | 'isSuperAdmin' | 'isTenantManager' | 'isDisabled'
 >> & {
   password?: string;
 };

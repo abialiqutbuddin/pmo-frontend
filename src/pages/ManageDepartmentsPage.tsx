@@ -18,10 +18,43 @@ export const ManageDepartmentsPage: React.FC = () => {
   const [depts, setDepts] = useState<Department[]>([]);
   const [deptsLoading, setDeptsLoading] = useState(false);
   const [newDeptName, setNewDeptName] = useState('');
+  const [createParentId, setCreateParentId] = useState<string | null>(null);
   const [deptErr, setDeptErr] = useState<string | null>(null);
   const [overview, setOverview] = useState<DeptOverview[]>([]);
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [activeDeptId, setActiveDeptId] = useState<string>('');
+
+  // Flatten tree for display
+  const sortedDepts = useMemo(() => {
+    // 1. Map to nodes
+    const nodes = depts.map(d => ({ ...d, children: [] as any[], level: 0 }));
+    // 2. Build tree
+    const map = new Map(nodes.map(n => [n.id, n]));
+    const roots: typeof nodes = [];
+    nodes.forEach(n => {
+      if (n.parentId && map.has(n.parentId)) {
+        map.get(n.parentId)!.children.push(n);
+      } else {
+        roots.push(n);
+      }
+    });
+    // 3. Sort each level by name
+    const sortNodes = (list: typeof nodes) => {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      list.forEach(n => sortNodes(n.children));
+    };
+    sortNodes(roots);
+    // 4. Flatten
+    const flat: (Department & { level: number })[] = [];
+    const traverse = (list: typeof nodes, level: number) => {
+      list.forEach(n => {
+        flat.push({ ...n, level });
+        traverse(n.children, level + 1);
+      });
+    };
+    traverse(roots, 0);
+    return flat;
+  }, [depts]);
 
   const [members, setMembers] = useState<DeptMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
@@ -108,16 +141,17 @@ export const ManageDepartmentsPage: React.FC = () => {
       }
     }, 250);
     return () => clearTimeout(t);
-  }, [query, activeDeptId, currentEventId, canAdminEvent, isSuperAdmin, globalUsers.length, members.map(m=>m.userId).join(',')]);
+  }, [query, activeDeptId, currentEventId, canAdminEvent, isSuperAdmin, globalUsers.length, members.map(m => m.userId).join(',')]);
 
   const activeDept = useMemo(() => depts.find((d) => d.id === activeDeptId), [depts, activeDeptId]);
 
   async function createDept() {
     if (!newDeptName.trim() || !currentEventId) return;
     try {
-      const d = await departmentsService.create(currentEventId, newDeptName.trim());
-      setDepts((prev) => [...prev, d].sort((a, b) => a.name.localeCompare(b.name)));
+      const d = await departmentsService.create(currentEventId, newDeptName.trim(), createParentId || undefined);
+      setDepts((prev) => [...prev, d]); // re-sort handled by useMemo
       setNewDeptName('');
+      setCreateParentId(null);
     } catch (e: any) {
       setDeptErr(e?.message || 'Failed to create department');
     }
@@ -163,7 +197,8 @@ export const ManageDepartmentsPage: React.FC = () => {
     setMembers((prev) => prev.filter((m) => m.userId !== userId));
   }
 
-  if (!canAdminEvent) return <div className="p-6">You do not have admin permissions for this event.</div>;
+  const isTM = !!useAuthStore((s) => s.currentUser?.isTenantManager);
+  if (!canAdminEvent && !isSuperAdmin && !isTM) return <div className="p-6">You do not have admin permissions for this event.</div>;
 
   return (
     <Page className="space-y-6">
@@ -179,23 +214,50 @@ export const ManageDepartmentsPage: React.FC = () => {
             <Building2 size={18} className="text-emerald-600 mr-2" />
             <div className="font-medium">Departments</div>
           </div>
-          <div className="flex items-center gap-2">
-            <input className="flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm" placeholder="New department name" value={newDeptName} onChange={(e)=> setNewDeptName(e.target.value)} />
-            <button onClick={createDept} disabled={!newDeptName.trim()} className="inline-flex items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm"><Plus size={16} className="mr-1"/>Create</button>
+
+          <div className="space-y-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Create New</div>
+            <input className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm" placeholder="Department name" value={newDeptName} onChange={(e) => setNewDeptName(e.target.value)} />
+
+            {/* Parent Select */}
+            {depts.length > 0 && (
+              <div className="text-sm">
+                <Dropdown
+                  value={createParentId || ''}
+                  onChange={(v) => setCreateParentId(v)}
+                  options={[{ value: '', label: 'No Parent (Top Level)' }, ...sortedDepts.map(d => ({ value: d.id, label: d.level > 0 ? '\u00A0\u00A0'.repeat(d.level) + '↳ ' + d.name : d.name }))]}
+                  placeholder="Select Parent (Optional)"
+                  fullWidth
+                />
+              </div>
+            )}
+
+            <button onClick={createDept} disabled={!newDeptName.trim()} className="w-full inline-flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm"><Plus size={16} className="mr-1" />Create Department</button>
           </div>
-          {deptsLoading && <div className="mt-2"><Spinner size="sm" label="Loading departments"/></div>}
+
+          {deptsLoading && <div className="mt-2"><Spinner size="sm" label="Loading departments" /></div>}
           {deptErr && <div className="text-xs text-rose-600">{deptErr}</div>}
-          <div className="border border-gray-100 rounded divide-y mt-2">
-            {(overview.length ? overview : depts.map((d) => ({ id: d.id, name: d.name, heads: [] as string[], memberCount: 0 } as any))).map((o: any) => (
-              <button key={o.id} className={`w-full text-left px-3 py-2 flex items-center justify-between hover:bg-gray-50 ${activeDeptId===o.id?'bg-blue-50':''}`} onClick={()=> setActiveDeptId(o.id)}>
-                <div>
-                  <div className="font-medium text-gray-900">{o.name}</div>
-                  <div className="text-xs text-gray-500">{(o.heads && o.heads.length) ? o.heads.join(', ') : 'No heads'}</div>
-                </div>
-                <span className="text-xs text-gray-600">{o.memberCount ?? 0} members</span>
-              </button>
-            ))}
-            {(!overview.length && !depts.length) && (<div className="px-3 py-4 text-sm text-gray-500">No departments yet. Create one above.</div>)}
+
+          <div className="border border-gray-100 rounded divide-y mt-2 max-h-[600px] overflow-y-auto">
+            {sortedDepts.map((d: any) => {
+              const o = overview.find(x => x.id === d.id);
+              return (
+                <button key={d.id} className={`w-full text-left px-3 py-2 flex items-center justify-between hover:bg-gray-50 ${activeDeptId === d.id ? 'bg-blue-50' : ''}`}
+                  onClick={() => setActiveDeptId(d.id)}
+                  style={{ paddingLeft: `${(d.level * 16) + 12}px` }}
+                >
+                  <div className="flex items-center overflow-hidden">
+                    {d.level > 0 && <span className="text-gray-400 mr-1">↳</span>}
+                    <div>
+                      <div className="font-medium text-gray-900 truncate">{d.name}</div>
+                      <div className="text-xs text-gray-500 truncate max-w-[120px]">{(o?.heads && o.heads.length) ? o.heads.join(', ') : 'No heads'}</div>
+                    </div>
+                  </div>
+                  <span className="text-xs text-gray-600 ml-2 shrink-0">{o?.memberCount ?? 0}</span>
+                </button>
+              );
+            })}
+            {(!depts.length) && (<div className="px-3 py-4 text-sm text-gray-500">No departments yet.</div>)}
           </div>
         </div>
 
@@ -207,8 +269,8 @@ export const ManageDepartmentsPage: React.FC = () => {
                 <button className="ml-auto text-sm text-gray-600 hover:text-gray-900 inline-flex items-center" onClick={() => {
                   const name = prompt('Rename department', activeDept.name);
                   if (name && name.trim()) renameDept(activeDept.id, name.trim());
-                }}><Pencil size={14} className="mr-1"/>Rename</button>
-                <button className="ml-3 text-sm text-rose-600 hover:text-rose-700 inline-flex items-center" onClick={() => deleteDept(activeDept.id)}><Trash2 size={14} className="mr-1"/>Delete</button>
+                }}><Pencil size={14} className="mr-1" />Rename</button>
+                <button className="ml-3 text-sm text-rose-600 hover:text-rose-700 inline-flex items-center" onClick={() => deleteDept(activeDept.id)}><Trash2 size={14} className="mr-1" />Delete</button>
               </div>
               <div className="mb-3 flex items-center gap-2">
                 <div className="relative flex-1">
@@ -217,9 +279,9 @@ export const ManageDepartmentsPage: React.FC = () => {
                     className="w-full pl-7 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm"
                     placeholder="Search users to add"
                     value={query}
-                    onChange={(e)=> { setQuery(e.target.value); setAssignUserId(''); setAssignOpen(true); }}
+                    onChange={(e) => { setQuery(e.target.value); setAssignUserId(''); setAssignOpen(true); }}
                     onFocus={() => setAssignOpen(true)}
-                    onBlur={() => setTimeout(()=> setAssignOpen(false), 150)}
+                    onBlur={() => setTimeout(() => setAssignOpen(false), 150)}
                   />
                   {assignOpen && assignable.length > 0 && (
                     <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-sm max-h-56 overflow-auto">
@@ -227,7 +289,7 @@ export const ManageDepartmentsPage: React.FC = () => {
                         <button
                           key={u.userId}
                           type="button"
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${assignUserId===u.userId ? 'bg-blue-50' : ''}`}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${assignUserId === u.userId ? 'bg-blue-50' : ''}`}
                           onClick={() => { setAssignUserId(u.userId); setQuery(u.fullName || u.email || u.userId); setAssignOpen(false); }}
                         >
                           <div className="font-medium text-gray-900">{u.fullName || u.email || u.userId}</div>
@@ -237,34 +299,34 @@ export const ManageDepartmentsPage: React.FC = () => {
                     </div>
                   )}
                 </div>
-                <Dropdown value={assignRole} onChange={(v)=> setAssignRole(v as any)} options={[{ value: 'DEPT_MEMBER', label: 'Member' }, { value: 'DEPT_HEAD', label: 'Head' }, { value: 'OBSERVER', label: 'Observer' }]} />
+                <Dropdown value={assignRole} onChange={(v) => setAssignRole(v as any)} options={[{ value: 'DEPT_MEMBER', label: 'Member' }, { value: 'DEPT_HEAD', label: 'Head' }, { value: 'OBSERVER', label: 'Observer' }]} />
                 <button
                   className="inline-flex items-center bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-3 py-2 text-sm"
                   disabled={!assignable.length || assignLoading}
-                  onClick={()=> {
+                  onClick={() => {
                     const target = assignUserId || (assignable[0]?.userId || '');
                     if (!target) return;
                     addMember(target);
                   }}
                 >
-                  <UserPlus size={16} className="mr-1"/>Add
+                  <UserPlus size={16} className="mr-1" />Add
                 </button>
               </div>
               {/* Searchable dropdown replaces list of candidates */}
               <div className="border rounded divide-y">
-                {membersLoading && <div className="p-3"><Spinner size="sm" label="Loading members"/></div>}
+                {membersLoading && <div className="p-3"><Spinner size="sm" label="Loading members" /></div>}
                 {membersErr && <div className="p-3 text-rose-600 text-sm">{membersErr}</div>}
-                {members.map((m)=> (
+                {members.map((m) => (
                   <div key={m.userId} className="px-3 py-2 flex items-center">
                     <div className="flex-1">
                       <div className="font-medium text-gray-900">{m.user?.fullName || m.userId}</div>
                       <div className="text-xs text-gray-500">{m.user?.email}</div>
                     </div>
-                    <Dropdown value={m.role} onChange={(v)=> updateRole(m.userId, v as any)} options={[{ value: 'DEPT_MEMBER', label: 'Member' }, { value: 'DEPT_HEAD', label: 'Head' }, { value: 'OBSERVER', label: 'Observer' }]} />
-                    <button className="ml-2 text-rose-600 hover:text-rose-700 text-sm" onClick={()=> removeMember(m.userId)}>Remove</button>
+                    <Dropdown value={m.role} onChange={(v) => updateRole(m.userId, v as any)} options={[{ value: 'DEPT_MEMBER', label: 'Member' }, { value: 'DEPT_HEAD', label: 'Head' }, { value: 'OBSERVER', label: 'Observer' }]} />
+                    <button className="ml-2 text-rose-600 hover:text-rose-700 text-sm" onClick={() => removeMember(m.userId)}>Remove</button>
                   </div>
                 ))}
-                {(!membersLoading && members.length===0) && <div className="px-3 py-4 text-sm text-gray-500">No members yet.</div>}
+                {(!membersLoading && members.length === 0) && <div className="px-3 py-4 text-sm text-gray-500">No members yet.</div>}
               </div>
             </>
           ) : (

@@ -15,6 +15,7 @@ export const EventCreatePage: React.FC = () => {
   const [name, setName] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
+  const [structure, setStructure] = useState<'ZONAL' | 'HIERARCHICAL'>('ZONAL');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -27,6 +28,7 @@ export const EventCreatePage: React.FC = () => {
         name,
         startsAt: toIsoOrUndefined(startsAt),
         endsAt: toIsoOrUndefined(endsAt),
+        structure,
       });
       navigate('/events', { replace: true });
     } catch (e: any) {
@@ -54,6 +56,23 @@ export const EventCreatePage: React.FC = () => {
             className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
             placeholder="e.g., City Marathon 2025"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm mb-1">Event Structure</label>
+          <select
+            value={structure}
+            onChange={(e) => setStructure(e.target.value as 'ZONAL' | 'HIERARCHICAL')}
+            className="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-600"
+          >
+            <option value="ZONAL">Zonal (Central + Zone-based departments)</option>
+            <option value="HIERARCHICAL">Hierarchical (Nested department structure)</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            {structure === 'ZONAL'
+              ? 'Best for events with geographic zones and zone-specific teams'
+              : 'Best for events with parent-child department relationships'}
+          </p>
         </div>
 
         <div className="grid md:grid-cols-2 gap-4">

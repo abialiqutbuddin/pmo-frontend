@@ -73,20 +73,33 @@ export const tasksService = {
     return res;
   },
 
-  dependencies: {
-    list: (eventId: string, departmentId: string, taskId: string) =>
-      api.get<TaskDependencies>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/dependencies`),
-    add: (
-      eventId: string,
-      departmentId: string,
-      taskId: string,
-      body: { upstreamId: string; depType: DepType }
-    ) => api.post<void>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/dependencies`, body),
-    remove: (
-      eventId: string,
-      departmentId: string,
-      taskId: string,
-      upstreamId: string,
-    ) => api.delete<void>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/dependencies`, { upstreamId }),
+  getDependencies: (eventId: string, departmentId: string, taskId: string) =>
+    api.get<{ blockers: any[]; dependents: any[] }>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/dependencies`),
+
+  addDependency: (eventId: string, departmentId: string, taskId: string, body: { blockerId: string }) =>
+    api.post<void>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/dependencies`, body),
+
+  removeDependency: (eventId: string, departmentId: string, taskId: string, body: { blockerId: string }) =>
+    api.delete<void>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/dependencies`, body),
+
+  search: (eventId: string, contextDepartmentId: string, query: string, targetDeptId?: string) => {
+    const params = new URLSearchParams();
+    params.set('q', query);
+    if (targetDeptId) params.set('targetDeptId', targetDeptId);
+    return api.get<TaskItem[]>(`/events/${eventId}/departments/${contextDepartmentId}/tasks/search?${params.toString()}`);
   },
+
+  searchEventTasks: (eventId: string, query: string) => {
+    return api.get<{ id: string; title: string; status: any; priority: any; assignee?: any }[]>(
+      `/events/${eventId}/tasks/search?q=${encodeURIComponent(query)}`
+    );
+  },
+
+  // Re-implement search properly below because of path issue
+  activity: (eventId: string, departmentId: string, taskId: string) =>
+    api.get<any[]>(`/events/${eventId}/departments/${departmentId}/tasks/${taskId}/activity`),
 };
+
+// Fix for search path: We need a departmentId to hit the controller. 
+// I'll update the `search` signature to include departmentId (context) as well.
+

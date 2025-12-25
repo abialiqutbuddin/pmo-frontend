@@ -13,11 +13,12 @@ interface ChatHeaderProps {
   roomId: string;
   roomName: string;
   isGroup?: boolean;
+  isSystemGroup?: boolean;
 }
 
 const EMPTY_PARTICIPANTS: Record<string, any> = Object.freeze({});
 
-export const ChatHeader: React.FC<ChatHeaderProps> = ({ roomId, roomName, isGroup }) => {
+export const ChatHeader: React.FC<ChatHeaderProps> = ({ roomId, roomName, isGroup, isSystemGroup }) => {
   // Avoid returning a new object from the selector (which triggers useSyncExternalStore warnings)
   const partMap = useChatStore((s) => s.participants[roomId] ?? EMPTY_PARTICIPANTS);
   const me = useAuthStore((s) => s.currentUser);
@@ -45,11 +46,12 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ roomId, roomName, isGrou
 
   const extraCount = Math.max(0, Object.keys(partMap).length - avatars.length);
 
+  // System groups don't allow manual member management
   const canAdd = useMemo(() => {
-    if (!isGroup) return false;
+    if (!isGroup || isSystemGroup) return false;
     const mine = (partMap as any)[me?.id || ''];
     return !!(mine && mine.role === 'OWNER');
-  }, [isGroup, partMap, me?.id]);
+  }, [isGroup, isSystemGroup, partMap, me?.id]);
 
   const amParticipant = useMemo(() => {
     if (!isGroup) return true; // DMs always have me
@@ -127,17 +129,17 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ roomId, roomName, isGrou
       </div>
 
       {/* Members drawer */}
-        {isGroup && (
-          <SideDrawer
-            open={showMembers}
-            onClose={() => setShowMembers(false)}
-            maxWidthClass="max-w-md"
+      {isGroup && (
+        <SideDrawer
+          open={showMembers}
+          onClose={() => setShowMembers(false)}
+          maxWidthClass="max-w-md"
           header={
             <div className="flex items-center justify-between w-full">
               <div className="text-lg font-semibold">Members{Object.values(partMap).length ? ` (${Object.values(partMap).length})` : ''}</div>
             </div>
           }
-          >
+        >
           <div className="p-4">
             {canAdd && (
               <div className="mb-3 flex items-center justify-between">
@@ -254,7 +256,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({ roomId, roomName, isGrou
             await loadMessages(roomId);
           } catch (e: any) {
             const msg = e?.response?.data?.message || e?.message || 'Failed to update members';
-            try { window.alert(msg); } catch {}
+            try { window.alert(msg); } catch { }
           } finally {
             setConfirm({ open: false });
           }

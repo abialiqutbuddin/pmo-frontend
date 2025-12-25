@@ -2,6 +2,7 @@
 import { create } from 'zustand';
 import { api } from '../api';
 import { useAuthStore } from './authStore';
+import type { ChatPermissions } from '../services/chat';
 
 export type EventRole =
   | 'OWNER'
@@ -15,22 +16,44 @@ export type EventRole =
 export interface Department {
   id: string;
   name: string;
+  parentId?: string | null;
+}
+
+export interface RolePermission {
+  actions: string[];
+  module: { key: string };
+}
+
+export interface DetailedRole {
+  id: string;
+  name: string; // or EventRole if strictly enum, but backend returns string name
+  permissions: RolePermission[];
 }
 
 export interface MyMembership {
-  role: EventRole;
+  role: EventRole | DetailedRole; // Keep compatibility or switch to DetailedRole
   departmentId?: string | null;
+  permissions?: string[];
 }
 
 interface ContextState {
   currentEventId: string | null;
   currentEventName: string | null;
+  currentEventStructure?: 'ZONAL' | 'HIERARCHICAL';
   currentDeptId: string | null;
 
   departments: Department[];
   myMemberships: MyMembership[];
   loadingContext: boolean;
   error?: string | null;
+
+  // Event-scoped permissions (e.g., ["tasks:read", "tasks:create", "chat:send_message"])
+  eventPermissions: string[];
+
+  // Chat-specific permissions for system groups
+  chatPermissions: ChatPermissions | null;
+
+  contextLoaded: boolean;
 
   // derived (kept in state for reactivity)
   isSuperAdmin: boolean;
@@ -40,6 +63,12 @@ interface ContextState {
   clearEvent: () => void;
   selectDepartment: (deptId: string | null) => void;
   refreshContext: () => Promise<void>;
+
+  /**
+   * Check if current user has an event-scoped permission.
+   * SuperAdmins automatically have all permissions.
+   */
+  hasEventPermission: (module: string, action: string) => boolean;
 }
 
 const LS_EVENT_ID = 'currentEventId';
@@ -57,23 +86,36 @@ export const useContextStore = create<ContextState>((set, get) => ({
 
   departments: [],
   myMemberships: [],
+  eventPermissions: [],
+  chatPermissions: null,
   loadingContext: false,
+  contextLoaded: false,
   error: null,
   isSuperAdmin: !!useAuthStore.getState().currentUser?.isSuperAdmin,
   canAdminEvent: !!useAuthStore.getState().currentUser?.isSuperAdmin,
+
+  hasEventPermission: (module, action) => {
+    const isSA = !!useAuthStore.getState().currentUser?.isSuperAdmin;
+    if (isSA) return true;
+    const perms = get().eventPermissions;
+    return perms.includes(`${module}:${action}`);
+  },
 
   clearEvent: () => {
     try {
       localStorage.removeItem(LS_EVENT_ID);
       localStorage.removeItem(LS_EVENT_NAME);
       localStorage.removeItem(LS_DEPT_ID);
-    } catch {}
+    } catch { }
     set({
       currentEventId: null,
       currentEventName: null,
       currentDeptId: null,
       departments: [],
       myMemberships: [],
+      eventPermissions: [],
+      chatPermissions: null,
+      contextLoaded: false,
       isSuperAdmin: !!useAuthStore.getState().currentUser?.isSuperAdmin,
       canAdminEvent: !!useAuthStore.getState().currentUser?.isSuperAdmin,
       error: null,
@@ -84,8 +126,8 @@ export const useContextStore = create<ContextState>((set, get) => ({
     try {
       localStorage.setItem(LS_EVENT_ID, eventId);
       if (name) localStorage.setItem(LS_EVENT_NAME, name);
-    } catch {}
-    set({ currentEventId: eventId, currentEventName: name ?? null });
+    } catch { }
+    set({ currentEventId: eventId, currentEventName: name ?? null, contextLoaded: false });
     await get().refreshContext();
   },
 
@@ -93,7 +135,7 @@ export const useContextStore = create<ContextState>((set, get) => ({
     try {
       if (deptId) localStorage.setItem(LS_DEPT_ID, deptId);
       else localStorage.removeItem(LS_DEPT_ID);
-    } catch {}
+    } catch { }
     set({ currentDeptId: deptId });
   },
 
@@ -110,11 +152,52 @@ export const useContextStore = create<ContextState>((set, get) => ({
       // list departments
       const depts = await api.get<Department[]>(`/events/${eventId}/departments`);
 
+      // Fetch event-scoped permissions for current user
+      let eventPerms: string[] = [];
+      try {
+        eventPerms = await api.get<string[]>(`/events/${eventId}/my-permissions`);
+      } catch {
+        // Permission endpoint might not exist yet or user has no permissions
+        eventPerms = [];
+      }
+
+      // Fetch chat-specific permissions for system groups
+      let chatPerms: ChatPermissions | null = null;
+      try {
+        chatPerms = await api.get<ChatPermissions>(`/chat/events/${eventId}/permissions`);
+      } catch {
+        chatPerms = null;
+      }
+
       // memberships (event-level)
-      const members = await api.get<{ userId: string; role: EventRole; departmentId?: string | null }[]>(
+      type BackendMember = { userId: string; role: { name: string; permissions: { actions: string[]; module: { key: string } }[] }; departmentId?: string | null };
+      const members = await api.get<BackendMember[]>(
         `/events/${eventId}/members`,
       );
-      let my = members.filter((m) => m.userId === auth.currentUser?.id);
+
+      const authUserId = auth.currentUser?.id;
+      const mapMember = (m: BackendMember): MyMembership => {
+        if (!m.role) {
+          return {
+            role: 'GUEST' as EventRole, // Fallback or handle appropriately
+            departmentId: m.departmentId,
+            permissions: []
+          };
+        }
+        const flatPerms = (m.role.permissions || []).flatMap(p => {
+          const acts = (p.actions as unknown as string[]) || []; // safety
+          return acts.map(a => `${p.module.key}:${a}`);
+        });
+        return {
+          role: m.role.name as EventRole,
+          departmentId: m.departmentId,
+          permissions: flatPerms
+        };
+      };
+
+      let my = members
+        .filter((m) => m.userId === authUserId)
+        .map(mapMember);
 
       // Robust fallback: if we don't see multiple dept-scoped memberships here,
       // probe department members per department to reconstruct accurate dept roles.
@@ -137,10 +220,15 @@ export const useContextStore = create<ContextState>((set, get) => ({
           );
           const reconstructed = rows.filter(Boolean) as { role: EventRole; departmentId: string }[];
           if (reconstructed.length) {
-            const eventScoped = my.filter((m) => !m.departmentId).map((m) => ({ role: m.role, departmentId: null as any }));
-            my = [...eventScoped, ...reconstructed];
+            const eventScoped = my.filter((m) => !m.departmentId).map((m) => ({ ...m }));
+            const reconstructedWithUser = reconstructed.map(r => ({
+              role: r.role,
+              departmentId: r.departmentId,
+              permissions: [] // Fallback does not fetch detailed perms yet, acceptable for edge case
+            }));
+            my = [...eventScoped, ...reconstructedWithUser];
           }
-        } catch {}
+        } catch { }
       }
 
       let currentDeptId = get().currentDeptId;
@@ -154,17 +242,38 @@ export const useContextStore = create<ContextState>((set, get) => ({
       try {
         localStorage.setItem(LS_EVENT_NAME, ev.name);
         if (currentDeptId) localStorage.setItem(LS_DEPT_ID, currentDeptId);
-      } catch {}
+      } catch { }
 
-      const isSA = !!useAuthStore.getState().currentUser?.isSuperAdmin;
-      const roles = my.map((m) => m.role);
-      const canAdmin = isSA || roles.includes('OWNER') || roles.includes('PMO_ADMIN');
+      const authState = useAuthStore.getState();
+      const isSA = !!authState.currentUser?.isSuperAdmin;
+      const isTM = !!authState.currentUser?.isTenantManager;
+
+      const roleNames = my.map((m) => {
+        if (!m.role) return '';
+        return typeof m.role === 'string' ? m.role : m.role.name || '';
+      });
+
+      // Check for event admin via:
+      // 1. SuperAdmin or Tenant Manager
+      // 2. Legacy event roles (OWNER, PMO_ADMIN)
+      // 3. Tenant-level permission for events
+      // 4. Event-scoped permission for manage_settings
+      const hasTenantPerm = authState.hasPermission;
+      const canAdmin = isSA || isTM ||
+        roleNames.includes('OWNER') ||
+        roleNames.includes('PMO_ADMIN') ||
+        hasTenantPerm('events', 'manage_settings') ||
+        hasTenantPerm('events', 'update') ||
+        eventPerms.includes('events:manage_settings');
 
       set({
         currentEventId: ev.id,
         currentEventName: ev.name,
+        currentEventStructure: (ev as any).structure || 'ZONAL',
         departments: depts,
         myMemberships: my,
+        eventPermissions: eventPerms,
+        chatPermissions: chatPerms,
         currentDeptId: currentDeptId ?? null,
         isSuperAdmin: isSA,
         canAdminEvent: canAdmin,
@@ -172,7 +281,8 @@ export const useContextStore = create<ContextState>((set, get) => ({
     } catch (e: any) {
       set({ error: e?.message || 'Failed to load event context' });
     } finally {
-      set({ loadingContext: false });
+      set({ loadingContext: false, contextLoaded: true });
     }
   },
 }));
+
