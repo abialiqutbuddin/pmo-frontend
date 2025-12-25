@@ -16,11 +16,11 @@ interface TaskHoverProps {
 }
 
 const statusColors: Record<TaskStatus, string> = {
-    TODO: 'bg-gray-100 text-gray-700',
-    IN_PROGRESS: 'bg-blue-100 text-blue-700',
-    IN_REVIEW: 'bg-purple-100 text-purple-700',
-    DONE: 'bg-green-100 text-green-700',
-    CANCELED: 'bg-red-100 text-red-700',
+    todo: 'bg-gray-100 text-gray-700',
+    in_progress: 'bg-blue-100 text-blue-700',
+    blocked: 'bg-red-100 text-red-700',
+    done: 'bg-green-100 text-green-700',
+    canceled: 'bg-gray-500 text-white',
 };
 
 export const TaskHoverCard: React.FC<TaskHoverProps> = ({ task }) => {

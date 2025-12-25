@@ -4,8 +4,6 @@ import { Spinner } from '../ui/Spinner';
 import { UserAvatar } from '../ui/UserAvatar';
 import { format } from 'date-fns';
 import { HighlightMentions } from '../ui/HighlightMentions';
-import { format } from 'date-fns';
-import { HighlightMentions } from '../ui/HighlightMentions';
 // import { AuditAction } from '@prisma/client'; 
 
 // If frontend doesn't have prisma client types, we can define a local type or use string.

@@ -11,6 +11,42 @@ import { useChatStore } from '../../store/chatStore';
 import { chatService } from '../../services/chat';
 import { isDmRead, isGroupAllRead } from '../../lib/chatRead';
 import { ReadReceiptsPopover } from './ReadReceiptsPopover';
+import { SmartUserHover } from '../users/SmartUserHover';
+import { SmartTaskHover } from '../tasks/SmartTaskHover';
+
+// Regex for mentions: @[Name](user:ID) and #[Title](task:ID)
+const MENTION_REGEX = /(@|#)\[([^\]]+)\]\((\w+):([^\)]+)\)/g;
+
+const RichMessageText: React.FC<{ content: string; roomId: string }> = React.memo(({ content, roomId }) => {
+  if (!content) return null;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = MENTION_REGEX.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(content.substring(lastIndex, match.index));
+    }
+    const trigger = match[1];
+    const name = match[2];
+    const type = match[3];
+    const id = match[4];
+
+    if (type === 'user') {
+      parts.push(<SmartUserHover key={match.index} userId={id} name={name} roomId={roomId} />);
+    } else if (type === 'task') {
+      parts.push(<SmartTaskHover key={match.index} taskId={id} title={name}>#{name}</SmartTaskHover>);
+    } else {
+      parts.push(match[0]);
+    }
+    lastIndex = MENTION_REGEX.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    parts.push(content.substring(lastIndex));
+  }
+
+  return <>{parts}</>;
+});
 
 interface MessageProps {
   message: ChatMessage;
@@ -64,13 +100,13 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
         let map = participants[message.roomId] || {} as any;
         if (!Object.keys(map).length) {
           try {
-            const rows2: any[] = await chatService.listParticipants(message.roomId);
+            const rows2 = (await chatService.listParticipants(message.roomId)) as any[];
             const m2: any = {};
             rows2.forEach((r: any) => {
               m2[r.userId] = { id: r.user?.id || r.userId, fullName: r.user?.fullName, email: r.user?.email, profileImage: r.user?.profileImage, itsId: r.user?.itsId };
             });
             map = m2;
-          } catch {}
+          } catch { }
         }
         const infoMap: Record<string, { name: string; profileImage?: string; itsId?: string | null }> = {};
         Object.values(map).forEach((u: any) => { infoMap[u.id] = { name: (u.fullName || u.email || u.id) as string, profileImage: u.profileImage, itsId: u.itsId }; });
@@ -118,110 +154,115 @@ export const Message: React.FC<MessageProps> = ({ message, showSender }) => {
 
   return (
     <>
-    <div className={clsx('flex items-end', isOwnMessage ? 'justify-end' : 'justify-start')}>
-      {/* Avatar on group chats for non-self messages */}
-      {showSender && !isOwnMessage && (
-        <div className="mr-2 self-end">
-          <UserAvatar nameOrEmail={message.sender.name} imageUrl={message.sender.avatarUrl} itsId={message.sender.itsId || undefined} size={28} />
+      <div className={clsx('flex items-end', isOwnMessage ? 'justify-end' : 'justify-start')}>
+        {/* Avatar on group chats for non-self messages */}
+        {showSender && !isOwnMessage && (
+          <div className="mr-2 self-end">
+            <UserAvatar nameOrEmail={message.sender.name} imageUrl={message.sender.avatarUrl} itsId={message.sender.itsId || undefined} size={28} />
+          </div>
+        )}
+        <div
+          className={clsx(
+            'relative rounded-lg p-3 shadow-sm max-w-xs lg:max-w-md',
+            isOwnMessage ? 'bg-emerald-100' : 'bg-white',
+          )}
+        >
+          <>
+            {/* Sender name (only when explicitly enabled, e.g., groups) */}
+            {showSender && !isOwnMessage && (
+              <div className="text-xs font-bold text-blue-600 mb-1">
+                {message.sender.name}
+              </div>
+            )}
+
+            {/* Message Content */}
+            {message.content && (
+              <div className="text-sm text-gray-800 whitespace-pre-wrap mb-1 break-words">
+                <RichMessageText content={message.content} roomId={message.roomId} />
+              </div>
+            )}
+
+            {/* Attachments */}
+            {Array.isArray((message as any).attachments) && (message as any).attachments.length > 0 && (
+              <div className="mt-1 space-y-2">
+                {(message as any).attachments.map((a: any, idx: number) => {
+                  const url = attachmentUrl(a);
+                  if (isImage(a.mimeType)) {
+                    return (
+                      <ImageAttachment key={`${a.id}-${idx}`} src={url} name={a.originalName} uploading={a.uploading} progress={a.progress} onClick={() => setLightbox({ src: url, name: a.originalName })} />
+                    );
+                  }
+                  return (
+                    <div className="inline-flex items-center px-2 py-1 rounded bg-white/70 border text-sm text-gray-700">
+                      <Paperclip size={16} className="mr-1" />
+                      <a
+                        key={`${a.id}-${idx}`}
+                        href={url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="truncate max-w-[220px] hover:underline"
+                        title={a.originalName}
+                      >
+                        {a.originalName || 'Attachment'}
+                      </a>
+                      {a.uploading && (
+                        <span className="ml-2 text-xs text-gray-500">{typeof a.progress === 'number' ? `${a.progress}%` : 'Uploading…'}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Timestamp and Read Receipt */}
+            <div className="relative flex justify-end items-center mt-1" onMouseEnter={onHover} onMouseLeave={onLeave}>
+              <span className="text-xs text-gray-500 mr-1">
+                {message.createdAt}
+              </span>
+              {isOwnMessage && (
+                (() => {
+                  const atts: any[] = (message as any).attachments || [];
+                  const uploading = atts.some((a) => a.uploading || (typeof a.progress === 'number' && a.progress < 100));
+                  if (uploading) {
+                    return <span className="inline-block w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />;
+                  }
+                  return (
+                    <span title={isDirect ? (dmRead ? 'Read' : 'Sent') : (groupAllRead ? 'All read' : 'Not all read')}>
+                      <CheckCheck
+                        size={16}
+                        className={clsx(isDirect ? (dmRead ? 'text-blue-500' : 'text-gray-400') : (groupAllRead ? 'text-blue-500' : 'text-gray-400'))}
+                      />
+                    </span>
+                  );
+                })()
+              )}
+              {/* Readers tooltip (group or any) */}
+              <ReadReceiptsPopover
+                open={isOwnMessage && showReaders && !isDirect}
+                loading={readersLoading}
+                readers={readers}
+                unreaders={unreaders}
+                meId={currentUser?.id}
+                containerClassName="absolute bottom-full right-0 mb-2"
+                arrow="bottom-right"
+              />
+            </div>
+          </>
+        </div>
+      </div>
+      {lightbox && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setLightbox(null)} />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <div className="relative max-w-5xl max-h-[90vh]">
+              <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[90vh] rounded" />
+              <button className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded" onClick={() => setLightbox(null)}>
+                <X size={18} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
-      <div
-        className={clsx(
-          'relative rounded-lg p-3 shadow-sm max-w-xs lg:max-w-md',
-          isOwnMessage ? 'bg-emerald-100' : 'bg-white',
-        )}
-      >
-          <>
-        {/* Sender name (only when explicitly enabled, e.g., groups) */}
-        {showSender && !isOwnMessage && (
-          <div className="text-xs font-bold text-blue-600 mb-1">
-            {message.sender.name}
-          </div>
-        )}
-
-        {/* Message Content */}
-        {message.content && <p className="text-sm whitespace-pre-wrap mb-1">{message.content}</p>}
-
-        {/* Attachments */}
-        {Array.isArray((message as any).attachments) && (message as any).attachments.length > 0 && (
-          <div className="mt-1 space-y-2">
-            {(message as any).attachments.map((a: any, idx: number) => {
-              const url = attachmentUrl(a);
-              if (isImage(a.mimeType)) {
-                return (
-                  <ImageAttachment key={`${a.id}-${idx}`} src={url} name={a.originalName} uploading={a.uploading} progress={a.progress} onClick={() => setLightbox({ src: url, name: a.originalName })} />
-                );
-              }
-              return (
-                <div className="inline-flex items-center px-2 py-1 rounded bg-white/70 border text-sm text-gray-700">
-                  <Paperclip size={16} className="mr-1" />
-                  <a
-                    key={`${a.id}-${idx}`}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="truncate max-w-[220px] hover:underline"
-                    title={a.originalName}
-                  >
-                    {a.originalName || 'Attachment'}
-                  </a>
-                  {a.uploading && (
-                    <span className="ml-2 text-xs text-gray-500">{typeof a.progress === 'number' ? `${a.progress}%` : 'Uploading…'}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Timestamp and Read Receipt */}
-        <div className="relative flex justify-end items-center mt-1" onMouseEnter={onHover} onMouseLeave={onLeave}>
-          <span className="text-xs text-gray-500 mr-1">
-            {message.createdAt}
-          </span>
-          {isOwnMessage && (
-            (() => {
-              const atts: any[] = (message as any).attachments || [];
-              const uploading = atts.some((a) => a.uploading || (typeof a.progress === 'number' && a.progress < 100));
-              if (uploading) {
-                return <span className="inline-block w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />;
-              }
-              return (
-                <CheckCheck
-                  size={16}
-                  className={clsx(isDirect ? (dmRead ? 'text-blue-500' : 'text-gray-400') : (groupAllRead ? 'text-blue-500' : 'text-gray-400'))}
-                  title={isDirect ? (dmRead ? 'Read' : 'Sent') : (groupAllRead ? 'All read' : 'Not all read')}
-                />
-              );
-            })()
-          )}
-          {/* Readers tooltip (group or any) */}
-          <ReadReceiptsPopover
-            open={isOwnMessage && showReaders && !isDirect}
-            loading={readersLoading}
-            readers={readers}
-            unreaders={unreaders}
-            meId={currentUser?.id}
-            containerClassName="absolute bottom-full right-0 mb-2"
-            arrow="bottom-right"
-          />
-        </div>
-          </>
-      </div>
-    </div>
-    {lightbox && (
-      <div className="fixed inset-0 z-50">
-        <div className="absolute inset-0 bg-black/70" onClick={() => setLightbox(null)} />
-        <div className="absolute inset-0 flex items-center justify-center p-4">
-          <div className="relative max-w-5xl max-h-[90vh]">
-            <img src={lightbox.src} alt={lightbox.name} className="max-w-full max-h-[90vh] rounded" />
-            <button className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded" onClick={() => setLightbox(null)}>
-              <X size={18} />
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
     </>
   );
 };
