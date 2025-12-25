@@ -10,7 +10,7 @@ interface ReadReceiptsPopoverProps {
   unreaders?: ReceiptItem[] | null;
   meId?: string | undefined;
   containerClassName?: string; // absolute positioning provided by parent
-  arrow?: 'top-right' | 'bottom-right' | 'none';
+  arrow?: 'top-right' | 'bottom-right' | 'top-left' | 'none';
 }
 
 export const ReadReceiptsPopover: React.FC<ReadReceiptsPopoverProps> = ({
@@ -34,8 +34,10 @@ export const ReadReceiptsPopover: React.FC<ReadReceiptsPopoverProps> = ({
             arrow === 'top-right'
               ? 'absolute -top-1 right-6 w-2 h-2 bg-white border-l border-t border-gray-200 rotate-45'
               : arrow === 'bottom-right'
-              ? 'absolute -bottom-1 right-6 w-2 h-2 bg-white border-l border-b border-gray-200 rotate-45'
-              : ''
+                ? 'absolute -bottom-1 right-6 w-2 h-2 bg-white border-l border-b border-gray-200 rotate-45'
+                : arrow === 'top-left'
+                  ? 'absolute -top-1 left-2 w-2 h-2 bg-white border-l border-t border-gray-200 rotate-45'
+                  : ''
           }
         />
       )}

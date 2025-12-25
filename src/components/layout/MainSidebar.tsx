@@ -263,7 +263,7 @@ export const MainSidebar: React.FC = () => {
   };
 
   return (
-    <div className={`${collapsed ? 'w-20' : 'w-72'} h-screen bg-[#1e1e24] text-gray-300 flex flex-col transition-all duration-300 ease-in-out border-r border-[#2a2a35] shadow-2xl z-20`}>
+    <div className={`${collapsed ? 'w-16' : 'w-56'} h-screen bg-[#1e1e24] text-gray-300 flex flex-col transition-all duration-300 ease-in-out border-r border-[#2a2a35] shadow-2xl z-20`}>
 
       {/* Search / Brand Area - Optional if user wants search in sidebar like reference image */}
       {!collapsed && (

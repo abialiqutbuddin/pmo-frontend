@@ -122,18 +122,26 @@ export const MessageList: React.FC<MessageListProps> = ({ roomId }) => {
         if (isNearBottom()) el.scrollTop = el.scrollHeight;
       }, 100);
 
-    } else if (isNearBottom()) {
-      // Stay pinned
-      scrollToBottom('auto');
     } else {
-      // New message from me?
-      const mine = last && last.sender.id === currentUser?.id;
-      if (mine && lastMessageIdRef.current !== lastId) {
-        scrollToBottom('smooth');
-      } else if (lastMessageIdRef.current !== lastId) {
-        // New message from others, and we are not at bottom -> show button
-        setShowScrollDown(true);
+      // For updates (not initial load)
+      const isNewMessage = len > prevLenRef.current || (lastId !== lastMessageIdRef.current);
+
+      if (isNewMessage) {
+        if (isNearBottom()) {
+          // User was at bottom, stay pinned
+          scrollToBottom('smooth');
+        } else {
+          // User was scrolled up
+          const mine = last && last.sender.id === currentUser?.id;
+          if (mine) {
+            scrollToBottom('smooth');
+          } else {
+            // New message from others, and we are not at bottom -> show button
+            setShowScrollDown(true);
+          }
+        }
       }
+      // If not a new message (just an update/reaction), do NOT scroll.
     }
 
     lastMessageIdRef.current = lastId;

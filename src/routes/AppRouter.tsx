@@ -109,9 +109,12 @@ const RequirePermission: React.FC<{
 
 // import { DebugHud } from '../components/debug/DebugHud';
 
+import { GlobalTaskDrawer } from '../components/tasks/GlobalTaskDrawer';
+
 export const AppRouter: React.FC = () => {
   return (
     <>
+      <GlobalTaskDrawer />
       {/* <DebugHud /> */}
       <Routes>
         {/* Auth routes (no sidebar) */}

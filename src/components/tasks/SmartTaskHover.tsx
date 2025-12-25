@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { TaskHoverCard } from './TaskHoverCard';
 import { tasksService } from '../../services/tasks';
 import { useContextStore } from '../../store/contextStore';
+import { usePageStateStore } from '../../store/pageStateStore';
 
 export const SmartTaskHover: React.FC<{ taskId: string; title: string; children: React.ReactNode }> = ({ taskId, title, children }) => {
     const [task, setTask] = useState<any>(null);
@@ -47,14 +48,42 @@ export const SmartTaskHover: React.FC<{ taskId: string; title: string; children:
         }
     }, [hovering, task, loading, currentEventId, taskId]);
 
+    const triggerRef = React.useRef<HTMLSpanElement>(null);
+    const [pos, setPos] = useState<{ vertical: 'top' | 'bottom'; horizontal: 'left' | 'right' }>({ vertical: 'top', horizontal: 'left' });
+
+    const handleMouseEnter = () => {
+        setHovering(true);
+        if (triggerRef.current) {
+            const rect = triggerRef.current.getBoundingClientRect();
+            const topSpace = rect.top;
+            const distToRightEdge = window.innerWidth - rect.left;
+
+            let v: 'top' | 'bottom' = topSpace > 250 ? 'top' : 'bottom'; // Tasks card is taller/wider?
+            let h: 'left' | 'right' = distToRightEdge > 300 ? 'left' : 'right';
+
+            setPos({ vertical: v, horizontal: h });
+        }
+    };
+
+    const setTasks = usePageStateStore(s => s.setTasks);
+
+    const handleClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setTasks({ viewingTaskId: taskId });
+    };
+
     return (
         <span
-            className="relative group inline-block text-blue-600 font-medium cursor-pointer"
-            onMouseEnter={() => setHovering(true)}
+            ref={triggerRef}
+            className="relative group inline-block text-blue-600 font-medium cursor-pointer hover:underline"
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={() => setHovering(false)}
+            onClick={handleClick}
         >
             {children}
             {hovering && task && (
-                <div className="absolute bottom-full left-0 mb-1 z-50">
+                <div className={`absolute z-50 ${pos.vertical === 'top' ? 'bottom-full mb-1' : 'top-full mt-1'} ${pos.horizontal === 'left' ? 'left-0' : 'right-0'}`}>
                     <TaskHoverCard task={task} />
                 </div>
             )}

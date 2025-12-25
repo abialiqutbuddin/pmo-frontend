@@ -10,6 +10,7 @@ type TasksPageState = {
   q: string;
   memberFilter?: string | 'all';
   overdueOnly?: boolean;
+  viewingTaskId?: string | null;
 };
 
 type GanttPageState = {
@@ -43,6 +44,7 @@ export const usePageStateStore = create<PageState>((set) => ({
     q: '',
     memberFilter: 'all',
     overdueOnly: false,
+    viewingTaskId: null,
   },
   setTasks: (patch) => set((s) => ({ tasks: { ...s.tasks, ...patch } })),
 

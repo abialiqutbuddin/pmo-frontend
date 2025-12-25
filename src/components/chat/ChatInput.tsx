@@ -32,6 +32,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
   const [mentionMode, setMentionMode] = useState<'user' | 'task' | null>(null);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
+  // Store mappings of Display Name -> ID/Metadata to transform on send
+  const pendingMentions = useRef<Record<string, { type: 'user' | 'task'; id: string }>>({});
 
   // Load members on mount or when event changes
   useEffect(() => {
@@ -77,14 +79,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
 
     if (lastTrigger !== -1) {
       const isAt = lastAt === lastTrigger;
-      const char = isAt ? '@' : '#';
-
       // Check validity: Start of line or preceded by space
       const prevChar = lastTrigger > 0 ? textUntilCursor[lastTrigger - 1] : ' ';
       if (/\s/.test(prevChar)) {
         const q = textUntilCursor.substring(lastTrigger + 1);
         // Check if q has spaces (allow spaces for names, but maybe limit length or stop at newline)
-        // Simple heuristic: if newline, stop.
         if (!q.includes('\n')) {
           setMentionMode(isAt ? 'user' : 'task');
           setQuery(q);
@@ -96,7 +95,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
     setMentionMode(null);
   };
 
-  const insertMention = (replacement: string) => {
+  const insertMention = (display: string, type: 'user' | 'task', id: string) => {
     const cursor = (document.querySelector('#chat-textarea') as HTMLTextAreaElement)?.selectionStart || text.length;
     const textUntilCursor = text.substring(0, cursor);
     const lastAt = textUntilCursor.lastIndexOf('@');
@@ -106,10 +105,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
     if (triggerIdx !== -1) {
       const before = text.substring(0, triggerIdx);
       const after = text.substring(cursor);
-      const newText = before + replacement + ' ' + after;
+      const triggerChar = type === 'user' ? '@' : '#';
+      const newText = before + triggerChar + display + ' ' + after;
+
+      // Store mapping
+      pendingMentions.current[display] = { type, id };
+
       setText(newText);
       setMentionMode(null);
-      // Restore focus? (React state update will re-render)
     }
   };
 
@@ -127,10 +130,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
         if (list[selectedIndex]) {
           if (mentionMode === 'user') {
             const u = list[selectedIndex];
-            insertMention(`@[${u.fullName}](user:${u.id})`);
+            insertMention(u.fullName, 'user', u.id);
           } else {
             const t = list[selectedIndex];
-            insertMention(`#[${t.title}](task:${t.id})`);
+            insertMention(t.title, 'task', t.id);
           }
         } else {
           setMentionMode(null); // Cancel if no selection
@@ -150,19 +153,34 @@ export const ChatInput: React.FC<ChatInputProps> = ({ roomId }) => {
 
   const handleSend = () => {
     if (text.trim() === '') return;
-    void send(roomId, text.trim());
+
+    // Transform pending mentions to rich syntax: @Name -> @[Name](user:ID)
+    let finalBody = text;
+    Object.entries(pendingMentions.current).forEach(([name, meta]) => {
+      const trigger = meta.type === 'user' ? '@' : '#';
+      // Replace all occurrences of @Name with @[Name](user:ID)
+      // Use word boundary to avoid partial matches if possible, but names have spaces.
+      // Simple replace might be risky for "Ali" vs "Ali Ahmed".
+      // But for now, let's assume direct replacement.
+      const search = `${trigger}${name}`;
+      const replace = `${trigger}[${name}](${meta.type}:${meta.id})`;
+      finalBody = finalBody.replaceAll(search, replace);
+    });
+
+    void send(roomId, finalBody.trim());
     setText('');
     setMentionMode(null);
+    pendingMentions.current = {};
   };
 
   return (
     <div className="flex items-end p-3 bg-gray-100 border-t border-gray-200 relative">
       {/* Mentions Dropdown */}
       {mentionMode === 'user' && filteredMembers.length > 0 && (
-        <MentionList users={filteredMembers} selectedIndex={selectedIndex} onSelect={(u) => insertMention(`@[${u.fullName}](user:${u.id})`)} />
+        <MentionList users={filteredMembers} selectedIndex={selectedIndex} onSelect={(u) => insertMention(u.fullName, 'user', u.id)} />
       )}
       {mentionMode === 'task' && tasks.length > 0 && (
-        <TaskMentionList tasks={tasks} selectedIndex={selectedIndex} onSelect={(t) => insertMention(`#[${t.title}](task:${t.id})`)} />
+        <TaskMentionList tasks={tasks} selectedIndex={selectedIndex} onSelect={(t) => insertMention(t.title, 'task', t.id)} />
       )}
 
       {/* Emoji & Attach Buttons */}

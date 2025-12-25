@@ -76,7 +76,7 @@ export const ChatSidebarItem: React.FC<ChatSidebarItemProps> = ({
         let map = participants[room.id] || {};
         if (!Object.keys(map).length) {
           try {
-            const rows: any[] = await chatService.listParticipants(room.id);
+            const rows = (await chatService.listParticipants(room.id)) as any[];
             const m2: any = {};
             rows.forEach((r: any) => {
               m2[r.userId] = {
@@ -88,7 +88,7 @@ export const ChatSidebarItem: React.FC<ChatSidebarItemProps> = ({
               };
             });
             map = m2;
-          } catch {}
+          } catch { }
         }
         const infoMap: Record<string, { name: string; profileImage?: string; itsId?: string | null }> = {};
         Object.values(map).forEach((u: any) => { infoMap[u.id] = { name: (u.fullName || u.email || u.id) as string, profileImage: u.profileImage, itsId: u.itsId }; });
@@ -147,10 +147,7 @@ export const ChatSidebarItem: React.FC<ChatSidebarItemProps> = ({
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-center">
           <h3 className={clsx('text-sm truncate', unread ? 'font-bold text-gray-900' : 'font-semibold')}>{room.name}</h3>
-          <div className="relative flex items-center gap-1" onMouseEnter={onHover} onMouseLeave={onLeave}>
-            {isMine && (
-              <CheckCheck size={16} className={clsx(room.isGroup ? (groupAllRead ? 'text-blue-500' : 'text-gray-400') : (dmRead ? 'text-blue-500' : 'text-gray-400'))} />
-            )}
+          <div className="relative flex items-center gap-1">
             <span className="text-xs text-gray-500">
               {room.lastMessage.createdAt ? new Date(room.lastMessage.createdAt).toLocaleTimeString() : ''}
             </span>
@@ -159,27 +156,32 @@ export const ChatSidebarItem: React.FC<ChatSidebarItemProps> = ({
                 {unread > 99 ? '99+' : unread}
               </span>
             )}
-            <ReadReceiptsPopover
-              open={isMine && room.isGroup && showTip}
-              loading={loading}
-              readers={readers}
-              unreaders={unreaders}
-              meId={me?.id}
-              containerClassName="absolute top-full right-0 mt-2"
-              arrow="top-right"
-            />
           </div>
         </div>
-        <p className={clsx('text-sm truncate', unread ? 'text-gray-900 font-medium' : 'text-gray-600')}>
-          {room.isGroup && room.lastMessage?.sender?.name ? (
-            <>
-              <span className="text-gray-800 font-medium mr-1">{room.lastMessage.sender.name}:</span>
-              <span>{room.lastMessage.content || ''}</span>
-            </>
-          ) : (
-            room.lastMessage.content || ''
+        <div className="flex items-center gap-1 relative" onMouseEnter={onHover} onMouseLeave={onLeave}>
+          {isMine && (
+            <CheckCheck size={16} className={clsx('shrink-0', room.isGroup ? (groupAllRead ? 'text-blue-500' : 'text-gray-400') : (dmRead ? 'text-blue-500' : 'text-gray-400'))} />
           )}
-        </p>
+          <p className={clsx('text-sm truncate flex-1', unread ? 'text-gray-900 font-medium' : 'text-gray-600')}>
+            {room.isGroup && room.lastMessage?.sender?.name ? (
+              <>
+                <span className="text-gray-800 font-medium mr-1">{room.lastMessage.sender.name}:</span>
+                <span>{room.lastMessage.content || ''}</span>
+              </>
+            ) : (
+              room.lastMessage.content || ''
+            )}
+          </p>
+          <ReadReceiptsPopover
+            open={!!(isMine && room.isGroup && showTip)}
+            loading={loading}
+            readers={readers}
+            unreaders={unreaders}
+            meId={me?.id}
+            containerClassName="absolute top-full left-0 mt-2 z-50"
+            arrow="top-left"
+          />
+        </div>
       </div>
     </div>
   );

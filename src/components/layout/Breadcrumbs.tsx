@@ -28,10 +28,7 @@ export const Breadcrumbs: React.FC = () => {
     if (params.departmentId) items.push({ label: deptName! });
   } else if (pathname.startsWith('/me/department')) {
     items.push({ label: 'Department' });
-  } else if (pathname.startsWith('/chat')) {
-    items.push({ label: 'Chat' });
-  } else if (pathname.startsWith('/tasks')) {
-    items.push({ label: 'Tasks' });
+
   } else if (pathname.startsWith('/feedback')) {
     items.push({ label: 'Feedback' });
   } else if (pathname.startsWith('/gantt')) {
