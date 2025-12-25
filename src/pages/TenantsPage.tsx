@@ -3,7 +3,7 @@ import { Page } from '../components/layout/Page';
 import { Spinner } from '../components/ui/Spinner';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../api';
-import { Plus, Building2 } from 'lucide-react';
+import { Plus, Building2, Trash2 } from 'lucide-react';
 
 interface Tenant {
     id: string;
@@ -110,6 +110,26 @@ export const TenantsPage: React.FC = () => {
                                         </td>
                                         <td className="px-4 py-3 text-gray-600">{t.slug}</td>
                                         <td className="px-4 py-3 text-gray-500">{new Date(t.createdAt).toLocaleDateString()}</td>
+                                        <td className="px-4 py-3 text-right">
+                                            <button
+                                                onClick={async () => {
+                                                    if (!confirm('Are you sure you want to delete this tenant? THIS WILL DELETE ALL DATA.')) return;
+                                                    setLoading(true);
+                                                    try {
+                                                        await api.delete(`/tenant/${t.id}`);
+                                                        setTenants(prev => prev.filter(x => x.id !== t.id));
+                                                    } catch (err: any) {
+                                                        alert('Failed to delete: ' + err.message);
+                                                    } finally {
+                                                        setLoading(false);
+                                                    }
+                                                }}
+                                                className="text-red-500 hover:text-red-700 p-1"
+                                                title="Delete Tenant"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </td>
                                     </tr>
                                 ))
                             )}
