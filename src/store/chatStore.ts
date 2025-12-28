@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
+import { connectChatSocket, getChatSocket, disconnectChatSocket } from '../lib/chatSocket';
 import { chatService, type Conversation } from '../services/chat';
 import { useAuthStore } from './authStore';
 import { useContextStore } from './contextStore';
@@ -79,12 +79,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (get().conversations || []).forEach((c) => ids.add(c.id));
         ids.forEach((id) => s.emit('conversation.join', { conversationId: id }));
         set({ pendingJoin: {} });
-      } catch {}
+      } catch { }
     });
     s.on('connect_error', (err) => set({ error: err?.message || 'Socket error' }));
     s.on('message.new', (msg: any) => {
       set((st) => {
         const arr = st.messages[msg.conversationId] ? [...st.messages[msg.conversationId]] : [];
+
+        // Deduplication: Skip if message with same id already exists
+        if (arr.some((m) => m.id === msg.id)) {
+          // Message already exists, just update lastMsg and conversations order
+          const lastMsg = { ...st.lastMsg, [msg.conversationId]: { id: msg.id, authorId: msg.authorId, content: msg.body, createdAt: msg.createdAt } };
+          const conversations = [...st.conversations];
+          const idx = conversations.findIndex((c) => c.id === msg.conversationId);
+          if (idx > 0) {
+            const [moved] = conversations.splice(idx, 1);
+            conversations.unshift(moved);
+          }
+          return { conversations, lastMsg };
+        }
+
         arr.push({
           id: msg.id,
           conversationId: msg.conversationId,
@@ -115,7 +129,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           const fn = get().loadParticipants;
           if (typeof fn === 'function') fn(msg.conversationId);
         }
-      } catch {}
+      } catch { }
     });
     s.on('message.attachment', (p: { conversationId: string; messageId: string; attachments: any[] }) => {
       set((st) => {
@@ -141,7 +155,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     // Participants list changes broadcast from server
     s.on('participants.updated', (p: { conversationId: string }) => {
-      try { const fn = get().loadParticipants; if (typeof fn === 'function') fn(p.conversationId); } catch {}
+      try { const fn = get().loadParticipants; if (typeof fn === 'function') fn(p.conversationId); } catch { }
     });
     // New conversation invited to me (e.g., added to a group)
     s.on('conversation.invited', (c: any) => {
@@ -160,9 +174,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       try {
         const s2 = getChatSocket();
         if (s2?.connected) s2.emit('conversation.join', { conversationId: c.id });
-      } catch {}
+      } catch { }
       // Preload minimal messages for preview accuracy
-      try { get().loadMessages(c.id); } catch {}
+      try { get().loadMessages(c.id); } catch { }
     });
     // Server denied joining a conversation (e.g., removed member)
     s.on('conversation.join-denied', (p: { conversationId: string }) => {
@@ -293,7 +307,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (s?.connected) {
       s.emit('message.send', { conversationId, body });
     } else {
-      const msg: any = await chatService.sendMessage({ conversationId, body }).catch(()=>null);
+      const msg: any = await chatService.sendMessage({ conversationId, body }).catch(() => null);
       if (msg) {
         set((st) => {
           const arr = st.messages[conversationId] ? [...st.messages[conversationId]] : [];
@@ -363,7 +377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   startDirect: async (eventId, userId) => {
     try {
       const conv: any = await chatService.startDirect(eventId, userId);
-      set((st) => ({ conversations: [conv, ...st.conversations.filter(c=>c.id!==conv.id)], activeId: conv.id }));
+      set((st) => ({ conversations: [conv, ...st.conversations.filter(c => c.id !== conv.id)], activeId: conv.id }));
       const s = getChatSocket();
       if (s?.connected) s.emit('conversation.join', { conversationId: conv.id });
       else set((st) => ({ pendingJoin: { ...(st.pendingJoin || {}), [conv.id]: true } }));
@@ -390,7 +404,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           participants: { ...st.participants, [conv.id]: map },
           dmNames: { ...st.dmNames, [conv.id]: name },
         }));
-      } catch {}
+      } catch { }
       return conv.id as string;
     } catch {
       return null;
@@ -424,7 +438,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const arr = st.messages[conversationId] ? [...st.messages[conversationId]] : [];
               const idx = arr.findIndex((m) => m.id === msg.id);
               const optimistic: any = { id: 'temp', originalName: file.name, mimeType: file.type, size: file.size, uploading: true, progress: 0 };
-              const updated = idx >= 0 ? { ...arr[idx], attachments: [ ...(arr[idx].attachments || []), optimistic ] } : { ...msg, attachments: [optimistic] };
+              const updated = idx >= 0 ? { ...arr[idx], attachments: [...(arr[idx].attachments || []), optimistic] } : { ...msg, attachments: [optimistic] };
               if (idx >= 0) arr[idx] = updated; else arr.push(updated);
               return { messages: { ...st.messages, [conversationId]: arr } };
             });
@@ -465,7 +479,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
               const arr = st.messages[conversationId] ? [...st.messages[conversationId]] : [];
               const idx = arr.findIndex((m) => m.id === msg.id);
               const optimistic = files.map((f, i) => ({ id: `temp-${i}`, originalName: f.name, mimeType: f.type, size: f.size, uploading: true, progress: 0 } as any));
-              const updated = idx >= 0 ? { ...arr[idx], attachments: [ ...(arr[idx].attachments || []), ...optimistic ] } : { ...msg, attachments: optimistic };
+              const updated = idx >= 0 ? { ...arr[idx], attachments: [...(arr[idx].attachments || []), ...optimistic] } : { ...msg, attachments: optimistic };
               if (idx >= 0) arr[idx] = updated; else arr.push(updated);
               return { messages: { ...st.messages, [conversationId]: arr } };
             });
@@ -536,6 +550,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
           hasMore: { ...st.hasMore, [conversationId]: !!(json.items && json.items.length) },
         };
       });
-    } catch {}
+    } catch { }
   },
 }));
+
+// Automatically disconnect and reset when user logs out
+useAuthStore.subscribe((state, prevState) => {
+  if (!state.accessToken && prevState.accessToken) {
+    disconnectChatSocket();
+    useChatStore.getState().reset();
+  }
+});

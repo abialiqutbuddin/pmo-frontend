@@ -62,6 +62,14 @@ export const UserProfilePage: React.FC = () => {
               <div><span className="text-gray-500">Disabled:</span> {user.isDisabled ? 'Yes' : 'No'}</div>
               <div><span className="text-gray-500">Created:</span> {new Date(user.createdAt).toLocaleString()}</div>
             </div>
+            <div className="mt-4">
+              <button
+                onClick={() => useAuthStore.getState().logout()}
+                className="w-full bg-red-50 text-red-700 font-medium py-2 px-4 rounded hover:bg-red-100 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       )}

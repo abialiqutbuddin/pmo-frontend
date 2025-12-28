@@ -169,7 +169,7 @@ export const TenantsPage: React.FC = () => {
                             </div>
 
                             <div className="border-t pt-4">
-                                <h3 className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wide">Initial Admin User</h3>
+                                <h3 className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wide">Initial Tenant Manager</h3>
                                 <div className="space-y-3">
                                     <div>
                                         <label className="block text-sm mb-1">Full Name</label>
@@ -178,7 +178,7 @@ export const TenantsPage: React.FC = () => {
                                             required
                                             value={form.adminName}
                                             onChange={e => setForm({ ...form, adminName: e.target.value })}
-                                            placeholder="Admin Name"
+                                            placeholder="Manager Name"
                                         />
                                     </div>
                                     <div>
