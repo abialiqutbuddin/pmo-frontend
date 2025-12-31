@@ -202,27 +202,8 @@ export const CentralTasksPage: React.FC = () => {
   };
 
   const accessibleDepts = useMemo(() => {
-    if (isSuperAdmin || canAdminEvent) return departments;
-
-    // Check for global membership WITH task read permissions
-    const globalWithRead = myMemberships.find(m =>
-      !m.departmentId &&
-      (m.permissions?.includes('tasks:read') || m.permissions?.includes('tasks:read_all'))
-    );
-
-    if (globalWithRead) {
-      // User requested to see all nested departments as well
-      return departments;
-    }
-
-    const ids = new Set<string>();
-    for (const m of myMemberships) {
-      if (m.departmentId && (m.permissions?.includes('tasks:read') || m.permissions?.includes('tasks:read_all'))) {
-        ids.add(m.departmentId);
-      }
-    }
-    return departments.filter((d) => ids.has(d.id));
-  }, [isSuperAdmin, canAdminEvent, departments, myMemberships]);
+    return departments;
+  }, [departments]);
 
   const isTM = !!useAuthStore((s) => s.currentUser?.isTenantManager);
 
@@ -239,7 +220,10 @@ export const CentralTasksPage: React.FC = () => {
 
     const ids = new Set<string>();
     for (const m of myMemberships) {
-      if (m.departmentId && m.permissions?.includes('tasks:create')) {
+      if (
+        m.departmentId &&
+        (m.permissions?.includes('tasks:create') || m.permissions?.includes('tasks:create_all'))
+      ) {
         ids.add(m.departmentId);
       }
     }
@@ -314,10 +298,7 @@ export const CentralTasksPage: React.FC = () => {
 
 
 
-  // Debugging logs
-  useEffect(() => {
-    // console.log('CentralTasksPage mounted/updated:', { currentEventId, deptIds[0] || '', accessibleDeptsLen: accessibleDepts.length });
-  }, [currentEventId, deptIds, accessibleDepts]);
+
 
   useEffect(() => {
     if (showCreate && deptIds.length === 0 && !createDeptId && accessibleDepts.length > 0) {
@@ -452,6 +433,19 @@ export const CentralTasksPage: React.FC = () => {
     return deptIds.some(id => writableDepts.some(d => d.id === id));
   }, [deptIds[0] || '', writableDepts]);
 
+  // Debugging logs
+  useEffect(() => {
+    console.log('--- DEBUG PERMISSIONS ---');
+    console.log('My Memberships:', myMemberships);
+    console.log('Writable Depts:', writableDepts);
+    console.log('Can Create:', canCreate);
+    console.log('Dept Ids:', deptIds);
+    myMemberships.forEach(m => {
+      console.log(`Member of ${m.departmentId || 'Global'} with perms:`, m.permissions);
+    });
+    console.log('-------------------------');
+  }, [currentEventId, deptIds, accessibleDepts, myMemberships, writableDepts, canCreate]);
+
   const canEditTask = (t: TaskItem) => {
     // Full update access via RBAC
     if (hasPermission('tasks', 'update')) return true;
@@ -468,7 +462,7 @@ export const CentralTasksPage: React.FC = () => {
   };
 
   async function createTask() {
-    if (!currentEventId || !deptIds[0] || '') return;
+    if (!currentEventId) return;
     if (!createForm.title.trim()) return;
     setCreating(true);
     try {

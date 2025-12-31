@@ -158,7 +158,7 @@ export function ModernSelect<T extends string | number | boolean = string>({
                         top: coords.top,
                         left: coords.left,
                         width: Math.max(coords.width, 220),
-                        zIndex: 9999,
+                        zIndex: 10002,
                         transform: coords.isUpwards ? 'translateY(-100%)' : 'none'
                     }}
                     className="portal-dropdown bg-white border border-gray-100 rounded-xl shadow-xl animate-in fade-in zoom-in-95 duration-100 origin-top-left overflow-hidden"

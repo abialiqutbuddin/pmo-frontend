@@ -170,66 +170,43 @@ export const useContextStore = create<ContextState>((set, get) => ({
       }
 
       // memberships (event-level)
-      type BackendMember = { userId: string; role: { name: string; permissions: { actions: string[]; module: { key: string } }[] }; departmentId?: string | null };
+      type BackendMember = {
+        userId: string;
+        role: { name: string; permissions: any[] };
+        departmentId?: string | null
+      };
       const members = await api.get<BackendMember[]>(
         `/events/${eventId}/members`,
       );
 
-      const authUserId = auth.currentUser?.id;
-      const mapMember = (m: BackendMember): MyMembership => {
+      // 2. Fetch MY memberships specifically (flattened permissions from backend)
+      type MyMembershipRes = {
+        userId: string;
+        role: { name: string; permissions: string[] };
+        departmentId?: string | null
+      };
+      const myMembershipsRaw = await api.get<MyMembershipRes[]>(
+        `/events/${eventId}/my-memberships`
+      );
+
+      const mapMember = (m: MyMembershipRes): MyMembership => {
         if (!m.role) {
           return {
-            role: 'GUEST' as EventRole, // Fallback or handle appropriately
+            role: 'GUEST' as EventRole,
             departmentId: m.departmentId,
             permissions: []
           };
         }
-        const flatPerms = (m.role.permissions || []).flatMap(p => {
-          const acts = (p.actions as unknown as string[]) || []; // safety
-          return acts.map(a => `${p.module.key}:${a}`);
-        });
         return {
           role: m.role.name as EventRole,
           departmentId: m.departmentId,
-          permissions: flatPerms
+          permissions: m.role.permissions || []
         };
       };
 
-      let my = members
-        .filter((m) => m.userId === authUserId)
-        .map(mapMember);
+      const my = myMembershipsRaw.map(mapMember);
 
-      // Robust fallback: if we don't see multiple dept-scoped memberships here,
-      // probe department members per department to reconstruct accurate dept roles.
-      // This handles backends that return deduped event members.
-      const myDeptScoped = my.filter((m) => !!m.departmentId);
-      if ((myDeptScoped.length <= 1) && depts.length > 1) {
-        try {
-          const rows = await Promise.all(
-            depts.map(async (d) => {
-              try {
-                const r = await api.get<{ userId: string; role: EventRole; departmentId: string }[]>(
-                  `/events/${eventId}/departments/${d.id}/members`
-                );
-                const me = (r || []).find((m) => m.userId === auth.currentUser?.id);
-                return me ? { role: me.role as EventRole, departmentId: d.id } : null;
-              } catch {
-                return null;
-              }
-            })
-          );
-          const reconstructed = rows.filter(Boolean) as { role: EventRole; departmentId: string }[];
-          if (reconstructed.length) {
-            const eventScoped = my.filter((m) => !m.departmentId).map((m) => ({ ...m }));
-            const reconstructedWithUser = reconstructed.map(r => ({
-              role: r.role,
-              departmentId: r.departmentId,
-              permissions: [] // Fallback does not fetch detailed perms yet, acceptable for edge case
-            }));
-            my = [...eventScoped, ...reconstructedWithUser];
-          }
-        } catch { }
-      }
+      // (Fallback logic removed: it was clearing permissions causing bugs)
 
       let currentDeptId = get().currentDeptId;
       const deptIds = unique(my.map((m) => m.departmentId || '').filter(Boolean) as string[]);

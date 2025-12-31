@@ -35,7 +35,7 @@ export const SideDrawer: React.FC<SideDrawerProps & { headerPadding?: string }> 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end items-center">
+    <div className="fixed inset-0 z-[9999] flex justify-end items-center">
       <div
         className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] ${entered && !closing ? 'opacity-100' : 'opacity-0'}`}
         onClick={handleClose}
