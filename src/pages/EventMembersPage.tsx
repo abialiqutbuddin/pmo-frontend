@@ -63,132 +63,134 @@ export default function EventMembersPage() {
     }
 
     return (
-        <div className="p-6 max-w-7xl mx-auto">
-            <header className="flex justify-between items-center mb-6">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Event Members</h1>
-                    <p className="text-sm text-gray-500 mt-1">Manage attendees and staff for {currentEventName}</p>
-                </div>
-                <button
-                    onClick={() => setShowAddModal(true)}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                    <UserPlus size={20} />
-                    Add Members
-                </button>
-            </header>
+        <div className="h-full overflow-y-auto p-6">
+            <div className="max-w-7xl mx-auto">
+                <header className="flex justify-between items-center mb-6">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Event Members</h1>
+                        <p className="text-sm text-gray-500 mt-1">Manage attendees and staff for {currentEventName}</p>
+                    </div>
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                        <UserPlus size={20} />
+                        Add Members
+                    </button>
+                </header>
 
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 flex gap-4">
-                    <div className="relative flex-1 max-w-md">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                        <input
-                            type="text"
-                            placeholder="Search members..."
-                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                        />
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-4 border-b border-gray-200 flex gap-4">
+                        <div className="relative flex-1 max-w-md">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                            <input
+                                type="text"
+                                placeholder="Search members..."
+                                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
+                                <tr>
+                                    <th className="px-6 py-3">Member</th>
+                                    <th className="px-6 py-3">Email</th>
+                                    <th className="px-6 py-3">ITS</th>
+                                    <th className="px-6 py-3">Role</th>
+                                    <th className="px-6 py-3">Department</th>
+                                    <th className="px-6 py-3 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {loading ? (
+                                    <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Loading...</td></tr>
+                                ) : filteredMembers.length === 0 ? (
+                                    <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No members found.</td></tr>
+                                ) : (
+                                    filteredMembers.map((m) => (
+                                        <tr key={m.userId} className="hover:bg-gray-50 transition-colors group">
+                                            <td className="px-6 py-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-medium">
+                                                        {m.user?.profileImage ? (
+                                                            <img src={m.user.profileImage} alt="" className="w-full h-full rounded-full object-cover" />
+                                                        ) : (
+                                                            (m.user?.fullName?.[0] || '?').toUpperCase()
+                                                        )}
+                                                    </div>
+                                                    <div className="font-medium text-gray-900">{m.user?.fullName || 'Unknown'}</div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 text-gray-600">{m.user?.email}</td>
+                                            <td className="px-6 py-4 text-gray-600 font-mono text-sm">{m.user?.itsId || '—'}</td>
+                                            <td className="px-6 py-4">
+                                                {m.role ? (
+                                                    <span className="inline-flex items-center px-2 py-1 rounded bg-purple-50 text-purple-700 text-xs font-medium border border-purple-100">
+                                                        <Shield size={12} className="mr-1" />
+                                                        {m.role.name}
+                                                    </span>
+                                                ) : <span className="text-gray-400 text-sm">—</span>}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {m.department ? (
+                                                    <span className="inline-flex items-center px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs font-medium border border-blue-100">
+                                                        {m.department.name}
+                                                    </span>
+                                                ) : <span className="text-gray-400 text-sm">—</span>}
+                                            </td>
+                                            <td className="px-6 py-4 text-right flex justify-end gap-2">
+                                                <button
+                                                    onClick={() => setEditingMember(m)}
+                                                    className="text-gray-400 hover:text-blue-600 p-1 bg-gray-50 rounded hover:bg-blue-50 transition-colors"
+                                                    title="Edit member"
+                                                >
+                                                    <Pencil size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => handleRemoveMember(m.userId)}
+                                                    className="text-gray-400 hover:text-red-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    title="Remove member"
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
-                            <tr>
-                                <th className="px-6 py-3">Member</th>
-                                <th className="px-6 py-3">Email</th>
-                                <th className="px-6 py-3">ITS</th>
-                                <th className="px-6 py-3">Role</th>
-                                <th className="px-6 py-3">Department</th>
-                                <th className="px-6 py-3 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-100">
-                            {loading ? (
-                                <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Loading...</td></tr>
-                            ) : filteredMembers.length === 0 ? (
-                                <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">No members found.</td></tr>
-                            ) : (
-                                filteredMembers.map((m) => (
-                                    <tr key={m.userId} className="hover:bg-gray-50 transition-colors group">
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-medium">
-                                                    {m.user?.profileImage ? (
-                                                        <img src={m.user.profileImage} alt="" className="w-full h-full rounded-full object-cover" />
-                                                    ) : (
-                                                        (m.user?.fullName?.[0] || '?').toUpperCase()
-                                                    )}
-                                                </div>
-                                                <div className="font-medium text-gray-900">{m.user?.fullName || 'Unknown'}</div>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 text-gray-600">{m.user?.email}</td>
-                                        <td className="px-6 py-4 text-gray-600 font-mono text-sm">{m.user?.itsId || '—'}</td>
-                                        <td className="px-6 py-4">
-                                            {m.role ? (
-                                                <span className="inline-flex items-center px-2 py-1 rounded bg-purple-50 text-purple-700 text-xs font-medium border border-purple-100">
-                                                    <Shield size={12} className="mr-1" />
-                                                    {m.role.name}
-                                                </span>
-                                            ) : <span className="text-gray-400 text-sm">—</span>}
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {m.department ? (
-                                                <span className="inline-flex items-center px-2 py-1 rounded bg-blue-50 text-blue-700 text-xs font-medium border border-blue-100">
-                                                    {m.department.name}
-                                                </span>
-                                            ) : <span className="text-gray-400 text-sm">—</span>}
-                                        </td>
-                                        <td className="px-6 py-4 text-right flex justify-end gap-2">
-                                            <button
-                                                onClick={() => setEditingMember(m)}
-                                                className="text-gray-400 hover:text-blue-600 p-1 bg-gray-50 rounded hover:bg-blue-50 transition-colors"
-                                                title="Edit member"
-                                            >
-                                                <Pencil size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => handleRemoveMember(m.userId)}
-                                                className="text-gray-400 hover:text-red-600 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                title="Remove member"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
+                {showAddModal && currentEventId && (
+                    <AddMembersModal
+                        eventId={currentEventId}
+                        onClose={() => setShowAddModal(false)}
+                        onSuccess={() => {
+                            setShowAddModal(false);
+                            loadMembers();
+                        }}
+                    />
+                )}
+
+                {editingMember && currentEventId && (
+                    <EditMemberDrawer
+                        eventId={currentEventId}
+                        member={editingMember}
+                        open={!!editingMember}
+                        onClose={() => setEditingMember(null)}
+                        onSuccess={() => {
+                            // Don't auto close here if you want to keep it open, but for now we close in drawer.
+                            // Just reload.
+                            loadMembers();
+                        }}
+                    />
+                )}
             </div>
-
-            {showAddModal && currentEventId && (
-                <AddMembersModal
-                    eventId={currentEventId}
-                    onClose={() => setShowAddModal(false)}
-                    onSuccess={() => {
-                        setShowAddModal(false);
-                        loadMembers();
-                    }}
-                />
-            )}
-
-            {editingMember && currentEventId && (
-                <EditMemberDrawer
-                    eventId={currentEventId}
-                    member={editingMember}
-                    open={!!editingMember}
-                    onClose={() => setEditingMember(null)}
-                    onSuccess={() => {
-                        // Don't auto close here if you want to keep it open, but for now we close in drawer.
-                        // Just reload.
-                        loadMembers();
-                    }}
-                />
-            )}
         </div>
     );
 }
